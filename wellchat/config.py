@@ -18,7 +18,8 @@ OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None  # endpoint lain yang kom
 # selalu dikirim eksplisit ke SDK: tanpa ini SDK membaca OPENAI_BASE_URL kosong dari env sebagai URL
 API_BASE_URL = OPENAI_BASE_URL or "https://api.openai.com/v1"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
-# hanya dikirim ke model reasoning (gpt-5*, o*); kosongkan agar tidak dikirim
+# effort default untuk OPENAI_MODEL dan entri MODEL_ALLOWLIST tanpa `@`; hanya dikirim ke model
+# reasoning (gpt-5*, gpt-6*, o*); kosongkan agar tidak dikirim
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")
 MAX_TOOL_ROUNDS = int(os.getenv("MAX_TOOL_ROUNDS", "8"))
 REQUEST_TIMEOUT_S = float(os.getenv("REQUEST_TIMEOUT_S", "120"))
@@ -27,6 +28,7 @@ ANSWER_DEADLINE_S = float(os.getenv("ANSWER_DEADLINE_S", "150"))
 FINAL_ROUND_RESERVE_S = float(os.getenv("FINAL_ROUND_RESERVE_S", "30"))
 # batas karakter hasil satu tool; hasil yang kepanjangan dipangkas agar tetap JSON valid
 MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "14000"))
-# Model tambahan yang boleh dipilih di dropdown UI, dipisah koma (opsional).
+# Model tambahan yang boleh dipilih di dropdown UI, dipisah koma (opsional). Entri boleh
+# membawa effort sendiri, misalnya `gpt-5-nano@low`; tanpa `@`, OPENAI_REASONING_EFFORT dipakai.
 # Kosong = tanpa dropdown, aplikasi hanya memakai OPENAI_MODEL.
 MODEL_ALLOWLIST = [m.strip() for m in os.getenv("MODEL_ALLOWLIST", "").split(",") if m.strip()]

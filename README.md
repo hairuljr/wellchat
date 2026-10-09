@@ -20,7 +20,7 @@ Selain yang diminta di soal, saya menambahkan beberapa hal berikut. Semuanya ops
 - **Batas waktu yang ditegakkan.** Satu jawaban dibatasi 150 detik di kode, di bawah syarat 3 menit, termasuk saat provider lambat atau macet.
 - **Dua bahasa dan pertanyaan lanjutan.** Jawaban mengikuti bahasa pertanyaan (Indonesia atau Inggris), dan beberapa giliran percakapan terakhir ikut dikirim supaya pertanyaan lanjutan seperti "kalau di laporan berikutnya?" tetap dipahami.
 - **CLI di terminal**, selain UI Streamlit, untuk pengecekan cepat dan skrip evaluasi.
-- **Pengujian.** 48 unit test (termasuk PDF sintetis dengan nilai berbeda untuk membuktikan parser tidak hafal file contoh), set evaluasi 23 pertanyaan dengan LLM sungguhan, dan rangkuman hasilnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md).
+- **Pengujian.** 53 unit test (termasuk PDF sintetis dengan nilai berbeda untuk membuktikan parser tidak hafal file contoh), set evaluasi 23 pertanyaan dengan LLM sungguhan, dan rangkuman hasilnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md).
 - **Endpoint OpenAI-compatible dan pilihan model.** Selain OpenAI, aplikasi bisa diarahkan ke endpoint lain lewat `OPENAI_BASE_URL`, dan model bisa dipilih per sesi lewat dropdown bila `MODEL_ALLOWLIST` diisi. Lihat [Memakai penyedia LLM selain OpenAI](#memakai-penyedia-llm-selain-openai) dan [Memilih model di UI](#memilih-model-di-ui-opsional).
 
 ---
@@ -74,12 +74,12 @@ Isi `OPENAI_API_KEY` di `.env`. Variabel lainnya opsional:
 |---|---|---|
 | `OPENAI_API_KEY` | (wajib) | API key OpenAI milik reviewer. |
 | `OPENAI_MODEL` | `gpt-5.4-mini` | Model apa pun yang mendukung *tool calling* dan *structured output* (JSON schema). |
-| `OPENAI_REASONING_EFFORT` | `none` | Hanya dikirim ke model *reasoning* (`gpt-5*`, `o*`). Untuk `gpt-5.4-mini`, Chat Completions menolak *tool calling* dengan effort selain `none`. Kosongkan kalau tidak ingin dikirim. |
+| `OPENAI_REASONING_EFFORT` | `none` | Effort default untuk `OPENAI_MODEL` dan entri `MODEL_ALLOWLIST` tanpa `@`. Hanya dikirim ke model *reasoning* (`gpt-5*`, `gpt-6*`, `o*`). Untuk `gpt-5.4-mini`, Chat Completions menolak *tool calling* dengan effort selain `none`. Kosongkan kalau tidak ingin dikirim. |
 | `OPENAI_BASE_URL` | (kosong) | Isi kalau ingin memakai endpoint lain yang kompatibel dengan OpenAI (Azure OpenAI, OpenRouter, vLLM/Ollama lokal). Dalam hal ini, `OPENAI_API_KEY` diisi dengan key dari penyedia tersebut. |
 | `ANSWER_DEADLINE_S` | `150` | Batas waktu (detik) untuk satu jawaban, termasuk semua putaran *tool*. Putaran *tool* berhenti lebih awal supaya jawaban akhir tetap selesai dalam batas ini. |
 | `FINAL_ROUND_RESERVE_S` | `30` | Waktu yang disisihkan khusus untuk jawaban akhir; tidak dipakai putaran *tool*. |
 | `MAX_TOOL_RESULT_CHARS` | `14000` | Batas karakter satu hasil *tool* sebelum dipangkas. Hasil yang dipangkas tetap JSON valid: item list dibuang dari belakang, dan bila tetap kepanjangan teksnya dipotong lalu dibungkus. Naikkan bila model punya *context window* besar, turunkan bila permintaan terasa lambat. |
-| `MODEL_ALLOWLIST` | (kosong) | Model lain yang boleh dipilih lewat dropdown di UI, dipisahkan koma. Kosong berarti tanpa dropdown; lihat [Memilih model di UI](#memilih-model-di-ui-opsional). |
+| `MODEL_ALLOWLIST` | (kosong) | Model lain yang boleh dipilih lewat dropdown di UI, dipisahkan koma; tulis `model@effort` untuk effort khusus. Kosong berarti tanpa dropdown; lihat [Memilih model di UI](#memilih-model-di-ui-opsional). |
 | `DATA_DIR`, `RAW_DIR`, `PARSED_DIR`, `DB_PATH` | `./data`, `./data/raw`, `./data/parsed`, `./data/wellchat.db` | Lokasi data. |
 
 API key tidak pernah masuk ke repositori karena `.env` sudah ada di `.gitignore`.
@@ -125,6 +125,7 @@ MODEL_ALLOWLIST=<model-1>,<model-2>
 Setelah itu sidebar menampilkan dropdown **Model**. Isinya `OPENAI_MODEL` ditambah model di `MODEL_ALLOWLIST`, tetapi hanya yang benar-benar tersedia di endpoint (dicek lewat `GET /v1/models`, di-cache 10 menit). Daftar ini sengaja dibatasi karena endpoint bisa mengembalikan ratusan model, termasuk model embedding, gambar, atau audio yang tidak mendukung *tool calling* dan *structured output*.
 
 - Pilihan model berlaku per sesi browser, jadi tidak mengubah model pengguna lain.
+- Model yang butuh *reasoning effort* berbeda bisa ditulis sebagai `model@effort`, misalnya `MODEL_ALLOWLIST=gpt-5.4-nano,gpt-5-nano@low`. Ini perlu karena model OpenAI tidak seragam: `gpt-5.4-*` hanya menerima tool calling dengan effort `none`, sedangkan `gpt-5-nano` justru menolak `none` dan menerima `minimal`, `low`, atau `medium`. Entri tanpa `@` memakai `OPENAI_REASONING_EFFORT`, dan dropdown menampilkan effort yang dipakai, misalnya `gpt-5-nano (effort: low)`.
 - Bila daftar gagal diambil atau tidak ada model allowlist yang tersedia di endpoint, UI kembali memakai `OPENAI_MODEL` dan menampilkan keterangannya.
 
 ## 4. Meletakkan dataset
@@ -340,7 +341,7 @@ Isi test suite:
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`pytest`) | **48/48 lulus** dalam ±6 detik |
+| Unit test (`pytest`) | **53/53 lulus** dalam ±6 detik |
 | Evaluasi end-to-end (`eval.run_eval`) dengan `gpt-5.4-mini` di api.openai.com | **23/23 lulus** di empat run terakhir berturut-turut, respons paling lambat **10,1 detik**, rata-rata 4,6 detik di run final (batas 180 detik) |
 
 Lingkungan pengujian, rincian per pertanyaan, dan catatan dari beberapa kali run ada di **[HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md)**.

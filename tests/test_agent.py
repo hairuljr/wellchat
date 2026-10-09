@@ -141,6 +141,18 @@ def test_reasoning_effort_only_for_reasoning_models(db_conn, model, has_effort):
     assert ("reasoning_effort" in client.calls[0]) == has_effort
 
 
+@pytest.mark.parametrize("model,effort,sent", [
+    ("gpt-5-nano", "low", "low"),          # effort per model dari allowlist
+    ("custom/model", "high", "high"),      # effort eksplisit dikirim walau namanya tidak dikenal
+    ("gpt-5-nano", None, "none"),          # tanpa effort eksplisit: OPENAI_REASONING_EFFORT
+])
+def test_explicit_reasoning_effort_overrides_the_default(db_conn, monkeypatch, model, effort, sent):
+    monkeypatch.setattr(config, "OPENAI_REASONING_EFFORT", "none")
+    client = FakeClient(answers=[_final("out_of_scope")])
+    WellChatAgent(db_conn, client=client, model=model, reasoning_effort=effort).ask("hi")
+    assert all(c["reasoning_effort"] == sent and "temperature" not in c for c in client.calls)
+
+
 @pytest.mark.parametrize("question,lang", [("Berapa NPT sumur TAPIS-F?", "id"), ("What is the NPT of tapis-c?", "en")])
 def test_offset_well_question_is_not_found_without_llm(db_conn, question, lang):
     client = FakeClient()

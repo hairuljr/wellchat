@@ -93,9 +93,13 @@ def _parse_answer(content: str) -> dict:
 
 
 class WellChatAgent:
-    def __init__(self, conn: sqlite3.Connection, client: OpenAI | None = None, model: str | None = None):
+    def __init__(self, conn: sqlite3.Connection, client: OpenAI | None = None, model: str | None = None,
+                 reasoning_effort: str | None = None):
         self.conn = conn
         self.model = model or config.OPENAI_MODEL
+        # None = pakai OPENAI_REASONING_EFFORT, yang hanya dikirim ke model yang dikenal sebagai model
+        # reasoning; effort yang dipilih eksplisit (misalnya dari `gpt-5-nano@low`) selalu dikirim
+        self.reasoning_effort = reasoning_effort
         self.client = client or OpenAI(api_key=config.OPENAI_API_KEY or None, base_url=config.API_BASE_URL,
                                        timeout=config.REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)
 
@@ -105,8 +109,10 @@ class WellChatAgent:
             kwargs.update(tool_choice="none", response_format=ANSWER_SCHEMA)
         elif tool_choice:
             kwargs["tool_choice"] = tool_choice
-        if config.OPENAI_REASONING_EFFORT and _is_reasoning_model(self.model):
-            kwargs["reasoning_effort"] = config.OPENAI_REASONING_EFFORT
+        explicit = self.reasoning_effort is not None
+        effort = self.reasoning_effort if explicit else config.OPENAI_REASONING_EFFORT
+        if effort and (explicit or _is_reasoning_model(self.model)):
+            kwargs["reasoning_effort"] = effort
         elif not _is_reasoning_model(self.model):
             kwargs["temperature"] = 0
         # batas wall-clock = jatah semua percobaan SDK (timeout per percobaan x jumlah percobaan)

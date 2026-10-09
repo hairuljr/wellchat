@@ -53,7 +53,7 @@ def endpoint_models(base_url: str | None) -> list[str]:
 
 
 def pick_model() -> str:
-    """Model untuk sesi ini: dropdown bila MODEL_ALLOWLIST diisi, selain itu OPENAI_MODEL."""
+    """Pilihan model untuk sesi ini (`model` atau `model@effort`): dropdown bila MODEL_ALLOWLIST diisi, selain itu OPENAI_MODEL."""
     if config.MODEL_ALLOWLIST:
         try:
             choices = models.model_choices(endpoint_models(config.OPENAI_BASE_URL))
@@ -61,7 +61,7 @@ def pick_model() -> str:
             choices = []
         if choices:
             # key membuat pilihan tersimpan per sesi browser, tidak memengaruhi pengguna lain
-            return st.selectbox("Model", choices, key="model_choice")
+            return st.selectbox("Model", choices, format_func=models.choice_label, key="model_choice")
         st.caption("Daftar model tidak bisa diambil atau tidak ada yang cocok dengan MODEL_ALLOWLIST; memakai OPENAI_MODEL.")
     st.caption(f"Model: `{config.OPENAI_MODEL}`")
     return config.OPENAI_MODEL
@@ -157,7 +157,8 @@ if question:
         with st.spinner("Mencari di dokumen..."):
             try:
                 with open_db(config.DB_PATH) as conn:
-                    result = WellChatAgent(conn, model=model).ask(question, history)
+                    model_name, effort = models.split_choice(model)
+                    result = WellChatAgent(conn, model=model_name, reasoning_effort=effort).ask(question, history)
                 answer, sources = result.answer, result.sources
                 meta = f"{result.status} · {result.seconds}s · {len(result.tool_calls)} tool calls"
             except Exception as exc:  # tampilkan error API/konfigurasi, bukan stack trace

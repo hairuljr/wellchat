@@ -6,7 +6,7 @@ Dokumen ini merangkum pengujian yang saya jalankan di mesin sendiri pada **9 Okt
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`python -m pytest -q`) | **48/48 lulus** dalam ±6 detik |
+| Unit test (`python -m pytest -q`) | **53/53 lulus** dalam ±6 detik |
 | Evaluasi end-to-end (`python -m eval.run_eval`) | **23/23 lulus** di empat run terakhir berturut-turut, termasuk run final dengan pengecekan `must_not` |
 | Waktu respons paling lambat | **10,1 detik** di run final (syarat soal: maksimal 180 detik) |
 | Rata-rata / median waktu respons | 4,6 detik / 4,5 detik (run final) |
@@ -34,8 +34,8 @@ Semua unit test berjalan tanpa API key. Bagian agen memakai LLM palsu yang jawab
 
 | File | Jumlah | Yang diuji |
 |---|---|---|
-| `tests/test_agent.py` | 22 | Jawaban dengan sitasi, penolakan baku, jawaban tanpa tool ditolak, "tidak ditemukan" tanpa mencari memicu riset ulang, sumber halusinasi dibuang, JSON schema hanya dikirim di panggilan akhir, JSON dalam blok kode, JSON dengan baris baru di dalam string, jawaban kosong atau `READY`, endpoint yang tidak mendukung `tool_choice="required"`, jawaban teks biasa hanya mengutip laporan yang disebut, `reasoning_effort` hanya untuk model reasoning, *offset well*, batas waktu jawaban, request yang macet dihentikan sesuai batas waktu dinding, `OPENAI_BASE_URL` kosong tetap ke api.openai.com |
-| `tests/test_models.py` | 5 | Dropdown model: urutan pilihan, tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, pilihan model tidak bocor ke sesi lain |
+| `tests/test_agent.py` | 25 | Jawaban dengan sitasi, penolakan baku, jawaban tanpa tool ditolak, "tidak ditemukan" tanpa mencari memicu riset ulang, sumber halusinasi dibuang, JSON schema hanya dikirim di panggilan akhir, JSON dalam blok kode, JSON dengan baris baru di dalam string, jawaban kosong atau `READY`, endpoint yang tidak mendukung `tool_choice="required"`, jawaban teks biasa hanya mengutip laporan yang disebut, `reasoning_effort` hanya untuk model reasoning kecuali dipilih eksplisit, *offset well*, batas waktu jawaban, request yang macet dihentikan sesuai batas waktu dinding, `OPENAI_BASE_URL` kosong tetap ke api.openai.com |
+| `tests/test_models.py` | 7 | Dropdown model: urutan pilihan, entri `model@effort` dan labelnya, model dan effort pilihan diteruskan ke agen, tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, pilihan model tidak bocor ke sesi lain |
 | `tests/test_parsers.py` | 8 | Header dan lokasi DGOS (termasuk `OPERATOR`), pembersihan label putih tersembunyi, rencana wireline, tabel DGOS, header dan NPT DDR, baris operasi DDR, glosarium, baris MD bulat/kosong dan laporan tanpa heading `BIT DATA` |
 | `tests/test_synthetic.py` | 4 | PDF buatan dengan layout serupa tetapi nilai berbeda: semua file terparsing, field dan NPT DDR baru, DGOS baru (termasuk `OPERATOR` dan `AFE No.`) bisa dicari, PDF dengan layout tak dikenal tetap bisa dicari |
 | `tests/test_tools.py` | 9 | Rencana operasi dari semua laporan, rencana yang disaring per topik (`wireline`, `WL`, `wireline run` hanya mengembalikan DDR #53 dan DGOS #72; topik tanpa kecocokan tetap mengembalikan semua rencana), daftar sumur, hasil tool yang terlalu panjang tetap JSON valid (teks panjang maupun list panjang), mud weight DGOS bisa diambil sebagai field |
@@ -119,6 +119,7 @@ Setelah perubahan ini saya menjalankan evaluasi penuh sekali lagi, kini dengan p
 Aplikasi juga bisa diarahkan ke endpoint lain yang kompatibel dengan OpenAI (`OPENAI_BASE_URL`), dan model bisa dipilih lewat dropdown di UI bila `MODEL_ALLOWLIST` diisi. Yang sudah saya cek:
 
 - **Model OpenAI lain.** Dengan satu pertanyaan glosarium lewat agen lengkap, `gpt-6-luna`, `gpt-5.4-nano`, `gpt-5.6-luna`, dan `gpt-4.1-mini` menjawab benar dalam 3–8 detik. `gpt-4.1-nano` dan `gpt-4o-mini` juga benar, tetapi menjawab dalam bahasa Inggris untuk pertanyaan berbahasa Indonesia. `gpt-5-nano` menolak `reasoning_effort=none`, jadi perlu effort lain.
+- **Model dengan reasoning effort.** Saya mengecek model murah mana yang menerima tool calling bersama effort selain `none`: hanya `gpt-5-nano` dan `gpt-5-mini` (keduanya justru menolak `none`), sementara `gpt-5.4-*`, `gpt-6-luna`, dan `gpt-5.6-luna` hanya menerima `none`. Karena itu entri allowlist bisa membawa effort sendiri (`gpt-5-nano@low`). Satu pertanyaan wireline dengan `gpt-5-nano@low` lulus penilaian eval dalam 20,6 detik; effort `low` terkirim di setiap panggilan.
 - **Endpoint OpenAI-compatible lain.** Saya menemukan dua masalah yang hanya muncul di sebagian proxy, dan keduanya sudah diperbaiki di kode (lihat README bagian Resolution poin 10 dan 11):
   - proxy yang menerapkan JSON schema dengan memaksa model langsung menjawab, sehingga tool tidak pernah dipanggil;
   - proxy yang terus mengirim keep-alive sehingga satu request bisa bertahan sampai 10 menit.
