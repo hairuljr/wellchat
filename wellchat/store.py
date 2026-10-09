@@ -1,7 +1,7 @@
-"""SQLite store built from the parsed JSON files.
+"""Penyimpanan SQLite yang dibangun dari file JSON hasil parsing.
 
-The JSON files are the source of truth; the database is a derived index that
-`ingest` rebuilds from them on every run, so it can always be deleted safely.
+File JSON adalah sumber kebenaran; database hanyalah indeks turunan yang dibangun
+ulang oleh `ingest` setiap kali dijalankan, jadi selalu aman untuk dihapus.
 """
 
 from __future__ import annotations
@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 SCHEMA = """
 CREATE TABLE documents (
@@ -61,14 +63,36 @@ def connect(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+@contextmanager
+def open_db(db_path: Path) -> Iterator[sqlite3.Connection]:
+    """Buka koneksi dan pastikan selalu ditutup, termasuk saat terjadi error.
+
+    `with connect(...)` hanya melakukan commit/rollback dan koneksinya tetap terbuka,
+    sehingga pemanggil yang jalan per pertanyaan (atau per baris yang dirender)
+    membocorkan file handle.
+    """
+    conn = connect(db_path)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def _split(text: str, limit: int = CHUNK_CHARS) -> list[str]:
-    """Split on line boundaries into pieces of at most ~limit characters."""
+    """Potong per baris menjadi potongan berukuran paling banyak ~limit karakter.
+
+    Dua baris terakhir dibawa ke potongan berikutnya (overlap) supaya konteks tidak
+    terputus di tengah kalimat. Overlap diukur dengan aturan yang sama seperti
+    akumulasi normal (panjang baris + newline), sehingga `size` selalu mencerminkan
+    panjang potongan yang sebenarnya.
+    """
     pieces, buf = [], []
     size = 0
     for line in text.splitlines():
         if size + len(line) > limit and buf:
             pieces.append("\n".join(buf))
-            buf, size = buf[-2:], sum(len(l) for l in buf[-2:])  # small overlap
+            keep = buf[-2:]  # sedikit overlap
+            buf, size = keep, sum(len(l) + 1 for l in keep)
         buf.append(line)
         size += len(line) + 1
     if buf:
@@ -126,7 +150,7 @@ def _rebuild(conn: sqlite3.Connection, docs: list[tuple[Path, dict]]) -> None:
         for s in doc.get("sections", []):
             cur.execute("INSERT INTO sections VALUES (?,?,?,?)", (doc_id, s["name"], json.dumps(s["pages"]), s["text"]))
             if s["name"] == "OPERATION SUMMARY" or doc["doc_type"] == "UNKNOWN":
-                continue  # indexed row by row / page by page below
+                continue  # diindeks per baris / per halaman di bawah
             for piece in _split(s["text"]):
                 chunks.append((doc_id, "section", s["name"], s["pages"][0], f"[{label}] {s['name']}\n{piece}"))
 
@@ -139,9 +163,10 @@ def _rebuild(conn: sqlite3.Connection, docs: list[tuple[Path, dict]]) -> None:
                  o["productive_code"], int(o["npt"]), o["rig_status"], o["md_from_m"], o["operation"], o["page"]),
             )
             npt = " NPT" if o["npt"] else ""
+            md = "-" if o["md_from_m"] is None else f"{o['md_from_m']} m"
             chunks.append((doc_id, "operation", f"{o['from']}-{o['to']}", o["page"],
                            f"[{label}] operation {o['from']}-{o['to']} ({o['hours']} hr, {o['phase']}/{o['activity']}"
-                           f"/{o['productive_code']}{npt}, MD {o['md_from_m']} m)\n{o['operation']}"))
+                           f"/{o['productive_code']}{npt}, MD {md})\n{o['operation']}"))
         for o in doc.get("next_day_operations", []):
             seq += 1
             cur.execute(
@@ -170,7 +195,7 @@ def _rebuild(conn: sqlite3.Connection, docs: list[tuple[Path, dict]]) -> None:
 
 
 def rebuild_database(db_path: Path, parsed_dir: Path) -> int:
-    """(Re)create the SQLite file from every JSON in parsed_dir. Returns document count."""
+    """Bangun (ulang) file SQLite dari semua JSON di parsed_dir. Mengembalikan jumlah dokumen."""
     docs = []
     for p in sorted(parsed_dir.glob("*.json")):
         with open(p, encoding="utf-8") as f:
@@ -182,12 +207,12 @@ def rebuild_database(db_path: Path, parsed_dir: Path) -> int:
     conn.executescript(SCHEMA)
     _rebuild(conn, docs)
     conn.close()
-    tmp.replace(db_path)  # atomic swap: a running chat app never sees a half-built DB
+    tmp.replace(db_path)  # tukar atomik: aplikasi yang sedang jalan tidak pernah membaca DB setengah jadi
     return len(docs)
 
 
 def fts_query(text: str) -> str:
-    """Turn free text into a safe FTS5 OR-query of quoted terms."""
+    """Ubah teks bebas menjadi query FTS5 berbentuk OR dari istilah yang dikutip, supaya aman."""
     terms = re.findall(r"[A-Za-z0-9][A-Za-z0-9.#/-]*", text)
     terms = [t.strip(".-/") for t in terms if len(t.strip(".-/")) > 1 or t.isdigit()]
     seen, out = set(), []

@@ -1,4 +1,4 @@
-"""Streamlit chat UI.  Run:  streamlit run app.py"""
+"""UI chat Streamlit. Jalankan dengan:  streamlit run app.py"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import streamlit as st
 from wellchat import config
 from wellchat.agent import WellChatAgent
 from wellchat.ingest import ingest
-from wellchat.store import connect
+from wellchat.store import open_db
 
 st.set_page_config(page_title="Well Data Chat", page_icon="🛢️", layout="wide")
 
@@ -29,28 +29,34 @@ def run_ingest() -> dict:
 def documents() -> list[dict]:
     if not config.DB_PATH.exists():
         return []
-    with connect(config.DB_PATH) as conn:
+    with open_db(config.DB_PATH) as conn:
         return [dict(r) for r in conn.execute("SELECT * FROM documents ORDER BY doc_type, report_date")]
 
 
-def source_path(file_name: str) -> Path | None:
-    for d in documents():
-        if d["file_name"] == file_name:
-            p = config.RAW_DIR / d["doc_id"]
-            return p if p.exists() else None
-    return None
+def _doc_id_by_name() -> dict[str, str]:
+    """Ambil semua nama sekali query, supaya tabel tidak dibaca ulang untuk setiap baris sumber."""
+    return {d["file_name"]: d["doc_id"] for d in documents()}
+
+
+def source_path(file_name: str, doc_ids: dict[str, str] | None = None) -> Path | None:
+    doc_id = (doc_ids or _doc_id_by_name()).get(file_name)
+    if not doc_id:
+        return None
+    p = config.RAW_DIR / doc_id
+    return p if p.exists() else None
 
 
 def render_sources(sources: list[dict], key: str) -> None:
     if not sources:
         return
     with st.expander(f"Sumber / Sources ({len(sources)})", expanded=True):
+        doc_ids = _doc_id_by_name()
         for i, s in enumerate(sources):
             page = f" — page {s['page']}" if s.get("page") else ""
             section = f" — {s['section']}" if s.get("section") and s["section"] != "retrieved" else ""
             cols = st.columns([5, 1])
             cols[0].markdown(f"📄 `{s['file']}`{page}{section}")
-            path = source_path(s["file"])
+            path = source_path(s["file"], doc_ids)
             if path:
                 cols[1].download_button("Unduh", path.read_bytes(), file_name=path.name, key=f"dl-{key}-{i}")
 
@@ -129,11 +135,11 @@ if question:
     with st.chat_message("assistant"):
         with st.spinner("Mencari di dokumen..."):
             try:
-                agent = WellChatAgent(connect(config.DB_PATH))
-                result = agent.ask(question, history)
+                with open_db(config.DB_PATH) as conn:
+                    result = WellChatAgent(conn).ask(question, history)
                 answer, sources = result.answer, result.sources
                 meta = f"{result.status} · {result.seconds}s · {len(result.tool_calls)} tool calls"
-            except Exception as exc:  # show API/config errors instead of a stack trace
+            except Exception as exc:  # tampilkan error API/konfigurasi, bukan stack trace
                 answer, sources, meta = f"⚠️ Error: {exc}", [], "error"
         st.markdown(answer)
         render_sources(sources, f"n{len(st.session_state.messages)}")
