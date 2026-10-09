@@ -8,6 +8,21 @@ PDF/DOCX ──► parser (pdfplumber, python-docx) ──► JSON per file ─�
           Streamlit UI / CLI ◄── agen LLM (OpenAI tool calling) ◄────┘
 ```
 
+### Di luar instruksi
+
+Selain yang diminta di soal, saya menambahkan beberapa hal berikut. Semuanya opsional untuk reviewer: README tetap bisa diikuti dari awal sampai akhir tanpa menyentuh satu pun.
+
+- **SQLite + pencarian full-text FTS5** (*nice to have* di soal). Database dibangun ulang dari JSON setiap kali `ingest` dan ditukar secara atomik. Lihat [bagian 8](#8-database-sqlite).
+- **Sitasi yang bisa diperiksa.** Setiap jawaban mencantumkan file, halaman, dan bagian laporan, lengkap dengan tombol untuk mengunduh PDF aslinya di UI.
+- **Upload PDF/DOCX lewat UI dan ingest inkremental.** File baru langsung diindeks tanpa restart, dan hanya file baru atau yang berubah yang diparsing ulang (SHA-256). PDF yang formatnya tidak dikenali tetap bisa ditanyakan lewat teks per halaman. Lihat [bagian 6](#6-menambah-pdf-baru).
+- **Peringatan kualitas data.** Kejanggalan di laporan sumber, misalnya *spud date* yang lebih baru dari tanggal laporan, ditandai saat parsing lalu ditampilkan di UI dan disampaikan di jawaban.
+- **Guardrail di kode, bukan hanya di prompt.** Sumber yang tidak ada di database dibuang, jawaban yang tidak pernah memanggil tool ditolak, pertanyaan tentang *offset well* langsung dijawab "tidak ditemukan" tanpa LLM, dan "tidak ditemukan" baru diterima setelah model benar-benar mencari. Lihat [Planning](#pendekatan).
+- **Batas waktu yang ditegakkan.** Satu jawaban dibatasi 150 detik di kode, di bawah syarat 3 menit, termasuk saat provider lambat atau macet.
+- **Dua bahasa dan pertanyaan lanjutan.** Jawaban mengikuti bahasa pertanyaan (Indonesia atau Inggris), dan beberapa giliran percakapan terakhir ikut dikirim supaya pertanyaan lanjutan seperti "kalau di laporan berikutnya?" tetap dipahami.
+- **CLI di terminal**, selain UI Streamlit, untuk pengecekan cepat dan skrip evaluasi.
+- **Pengujian.** 44 unit test (termasuk PDF sintetis dengan nilai berbeda untuk membuktikan parser tidak hafal file contoh), set evaluasi 23 pertanyaan dengan LLM sungguhan, dan rangkuman hasilnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md).
+- **Endpoint OpenAI-compatible dan pilihan model.** Selain OpenAI, aplikasi bisa diarahkan ke endpoint lain lewat `OPENAI_BASE_URL`, dan model bisa dipilih per sesi lewat dropdown bila `MODEL_ALLOWLIST` diisi. Lihat [Memakai penyedia LLM selain OpenAI](#memakai-penyedia-llm-selain-openai) dan [Memilih model di UI](#memilih-model-di-ui-opsional).
+
 ---
 
 ## Daftar isi
