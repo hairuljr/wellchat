@@ -35,3 +35,9 @@ def test_oversized_list_result_drops_items_but_keeps_citations(monkeypatch):
     out = json.loads(text)
     assert len(text) <= tools.MAX_RESULT_CHARS and out["truncated"] is True
     assert out["results"] == hits[:len(out["results"])] and len(out["results"]) > 5
+
+
+def test_dgos_mud_weight_is_a_field(db_conn):
+    out = json.loads(call_tool(db_conn, "get_report_fields", {"field": "mud weight"}))
+    dgos72 = [f for f in out["fields"] if f["file"] == "BARAKUDA-1_DGOS_72_20260829.pdf"]
+    assert [f["value"] for f in dgos72] == ["14.1 ppg"]

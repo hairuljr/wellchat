@@ -56,6 +56,11 @@ CREATE INDEX idx_gloss_term ON glossary(term COLLATE NOCASE);
 
 CHUNK_CHARS = 1500
 
+# Baris mud DGOS ditulis sebagai tabel, bukan `Label : value`; nilainya didaftarkan juga sebagai
+# field supaya get_report_fields(field="mud weight") menemukannya, bukan hanya pencarian teks.
+DGOS_MUD_FIELDS = [("mud_weight_ppg", "Mud Weight", "ppg"), ("mud_type", "Mud Type", ""),
+                   ("progress_m", "Progress", "m"), ("avg_rop_m_per_hr", "Avg ROP", "m/hr")]
+
 
 def connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -133,6 +138,11 @@ def _rebuild(conn: sqlite3.Connection, docs: list[tuple[Path, dict]]) -> None:
             cur.execute("INSERT INTO fields VALUES (?,?,?,?,?)", (doc_id, f["key"], f["label"], f["value"], f["page"]))
             if f["value"]:
                 field_lines.append(f"{f['label']}: {f['value']}")
+        mud = (doc.get("progress") or {}).get("mud") or {}
+        for key, name, unit in DGOS_MUD_FIELDS:
+            if mud.get(key) not in (None, "", "-"):
+                cur.execute("INSERT INTO fields VALUES (?,?,?,?,?)",
+                            (doc_id, name.lower().replace(" ", "_"), name, f"{mud[key]} {unit}".strip(), mud.get("page", 1)))
         if field_lines:
             chunks.append((doc_id, "fields", "header fields", 1, f"[{label}] header fields\n" + "\n".join(field_lines)))
         extra = []

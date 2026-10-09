@@ -101,6 +101,8 @@ def test_new_dgos_and_search(synthetic):
     root, _ = synthetic
     d = json.loads((root / "parsed" / "another_dgos.pdf.json").read_text())
     assert d["doc_type"] == "DGOS" and d["report_no"] == "8" and d["npt"] == "0.50 hrs due to pump repair."
+    f = {x["label"]: x["value"] for x in d["fields"]}
+    assert f["OPERATOR"] == "PTT PUBLIC COMPANY LIMITED" and f["AFE No."] == "P.TEST.0001"
     conn = connect(root / "db.sqlite")
     out = json.loads(call_tool(conn, "search_reports", {"query": "GR-Sonic wireline"}))
     assert out["results"][0]["file"] == "another_dgos.pdf"

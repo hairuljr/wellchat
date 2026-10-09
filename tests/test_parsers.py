@@ -21,6 +21,7 @@ def test_dgos_header_and_location(parsed_dir):
     assert d["doc_type"] == "DGOS" and d["report_no"] == "72" and d["report_date"] == "2026-08-29"
     assert "MALAYSIA" in _field(d, "COUNTRY")
     assert _field(d, "BASIN") == "OFFSHORE TERENGGANU"
+    assert _field(d, "OPERATOR") == "PTT PUBLIC COMPANY LIMITED" and _field(d, "OPERATORSHIP") == "COB"
 
 
 def test_dgos_hidden_white_labels_are_removed(parsed_dir):

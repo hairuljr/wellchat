@@ -56,9 +56,10 @@ def _fields(lines: list[Line]) -> list[dict]:
                 if m:
                     fields[label] = {"key": snake(label), "label": label, "value": m.group(1), "page": ln.page}
                     break
-    # buang heading di ujung baris yang menempel pada MAX DEVIATION / RIG NAME dll.
+    # buang heading di ujung baris yang menempel pada MAX DEVIATION / RIG NAME dll.; hanya bila
+    # menempel di belakang teks lain, karena OPERATOR bisa berisi persis "PTT PUBLIC COMPANY LIMITED"
     for f in fields.values():
-        f["value"] = re.sub(r"\s*(RIG INFORMATION|PTT PUBLIC COMPANY LIMITED)$", "", f["value"]).strip()
+        f["value"] = re.sub(r"(?<=\S)\s+(RIG INFORMATION|PTT PUBLIC COMPANY LIMITED)$", "", f["value"]).strip()
     # OFFSET WELLS berlanjut ke baris baru, satu-dua baris di bawah, berselang-seling dengan OBJECTIVES
     offset = fields.get("OFFSET WELLS")
     if offset and offset["value"].endswith(","):
