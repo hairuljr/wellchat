@@ -1,10 +1,11 @@
-"""Agent loop and guardrails, with a scripted fake LLM (no API key needed)."""
+"""Loop agen dan guardrail, diuji dengan LLM palsu yang jawabannya sudah diskenariokan (tanpa API key)."""
 
 import json
 from types import SimpleNamespace as NS
 
 import pytest
 
+from wellchat import config
 from wellchat.agent import NOT_FOUND, REFUSAL, WellChatAgent
 
 
@@ -91,3 +92,22 @@ def test_question_naming_the_reported_well_still_reaches_llm(db_conn):
     client = FakeClient([_final("out_of_scope")])
     WellChatAgent(db_conn, client=client, model="gpt-4.1-mini").ask("Seberapa jauh BARAKUDA-1 dari TAPIS-F?")
     assert len(client.calls) == 1
+
+
+def test_tool_rounds_stop_at_the_answer_deadline(db_conn, monkeypatch):
+    monkeypatch.setattr(config, "ANSWER_DEADLINE_S", 40)  # kurang dari 2x cadangan waktu ronde akhir
+    client = FakeClient([_final("not_found")])
+    WellChatAgent(db_conn, client=client, model="gpt-4.1-mini").ask("Berapa NPT?")
+    assert client.calls[0]["tool_choice"] == "none"
+    assert client.calls[0]["timeout"] <= 40
+
+
+def test_tool_round_keeps_time_for_the_final_answer(db_conn):
+    client = FakeClient([
+        _reply(tool_calls=[_tool_call("lookup_glossary", {"term": "BHA"})]),
+        _final("answered", "Bottom Hole Assembly"),
+    ])
+    WellChatAgent(db_conn, client=client, model="gpt-4.1-mini").ask("Apa itu BHA?")
+    first = client.calls[0]
+    assert "tool_choice" not in first
+    assert first["timeout"] * 2 <= config.ANSWER_DEADLINE_S - config.FINAL_ROUND_RESERVE_S

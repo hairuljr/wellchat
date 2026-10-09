@@ -1,4 +1,4 @@
-"""Tool-calling chat agent: the model may only answer from what the tools return."""
+"""Agen chat berbasis tool calling: model hanya boleh menjawab dari hasil tool."""
 
 from __future__ import annotations
 
@@ -127,15 +127,24 @@ def _is_reasoning_model(model: str) -> bool:
     return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
 
+MAX_RETRIES = 1
+
+
+def _attempt_timeout(window: float) -> float:
+    """SDK menerapkan timeout per percobaan, jadi jatah waktunya dibagi ke semua retry."""
+    return min(config.REQUEST_TIMEOUT_S, window) / (MAX_RETRIES + 1)
+
+
 class WellChatAgent:
     def __init__(self, conn: sqlite3.Connection, client: OpenAI | None = None, model: str | None = None):
         self.conn = conn
         self.model = model or config.OPENAI_MODEL
         self.client = client or OpenAI(api_key=config.OPENAI_API_KEY or None, base_url=config.OPENAI_BASE_URL,
-                                       timeout=config.REQUEST_TIMEOUT_S)
+                                       timeout=config.REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)
 
-    def _create(self, messages: list[dict], final: bool = False):
-        kwargs = dict(model=self.model, messages=messages, tools=TOOL_SPECS, response_format=ANSWER_SCHEMA)
+    def _create(self, messages: list[dict], final: bool, timeout: float):
+        kwargs = dict(model=self.model, messages=messages, tools=TOOL_SPECS, response_format=ANSWER_SCHEMA,
+                      timeout=timeout)
         if final:
             kwargs["tool_choice"] = "none"
         if config.OPENAI_REASONING_EFFORT and _is_reasoning_model(self.model):
@@ -145,7 +154,7 @@ class WellChatAgent:
         return self.client.chat.completions.create(**kwargs)
 
     def _offset_well_only(self, question: str) -> bool:
-        """True when the question names an offset well (no reports) and none of the reported wells."""
+        """True bila pertanyaan menyebut offset well (tanpa laporan) dan tidak menyebut sumur yang punya laporan."""
         q = question.upper()
         wells = {r[0].upper() for r in self.conn.execute(
             "SELECT DISTINCT well_name FROM documents WHERE doc_type != 'GLOSSARY' AND well_name IS NOT NULL")}
@@ -156,12 +165,13 @@ class WellChatAgent:
         return any(named(o) for o in offsets - wells) and not any(named(w) for w in wells)
 
     def ask(self, question: str, history: list[dict] | None = None) -> ChatResult:
-        started = time.time()
+        started = time.monotonic()
+        deadline = started + config.ANSWER_DEADLINE_S
         if self._offset_well_only(question):
             lang = "en" if re.search(r"\b(what|which|how|where|who|when|is|are|the|of)\b", question, re.I) else "id"
-            return ChatResult("not_found", NOT_FOUND[lang], [], lang, seconds=round(time.time() - started, 1))
+            return ChatResult("not_found", NOT_FOUND[lang], [], lang, seconds=round(time.monotonic() - started, 1))
         messages: list[dict] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for turn in (history or [])[-6:]:  # short memory for follow-up questions
+        for turn in (history or [])[-6:]:  # memori pendek untuk pertanyaan lanjutan
             messages.append({"role": turn["role"], "content": turn["content"]})
         messages.append({"role": "user", "content": question})
 
@@ -169,9 +179,13 @@ class WellChatAgent:
         consulted: dict[str, set] = {}
         response = None
         for round_no in range(config.MAX_TOOL_ROUNDS + 1):
-            response = self._create(messages, final=round_no == config.MAX_TOOL_ROUNDS)
+            remaining = deadline - time.monotonic()
+            final = round_no == config.MAX_TOOL_ROUNDS or remaining <= 2 * config.FINAL_ROUND_RESERVE_S
+            # ronde tool tidak boleh memakai waktu yang disisihkan untuk jawaban akhir
+            window = max(remaining, config.FINAL_ROUND_RESERVE_S) if final else remaining - config.FINAL_ROUND_RESERVE_S
+            response = self._create(messages, final=final, timeout=_attempt_timeout(window))
             msg = response.choices[0].message
-            if not msg.tool_calls:
+            if final or not msg.tool_calls:
                 break
             messages.append({
                 "role": "assistant",
@@ -187,12 +201,12 @@ class WellChatAgent:
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": output})
 
         result = self._finalize(response.choices[0].message.content or "", trace, consulted)
-        result.seconds = round(time.time() - started, 1)
+        result.seconds = round(time.monotonic() - started, 1)
         return result
 
     @staticmethod
     def _collect_sources(output: str, consulted: dict[str, set]) -> None:
-        """Remember which files/pages tools actually returned (fallback citations)."""
+        """Catat file/halaman yang benar-benar dikembalikan tool (cadangan sitasi)."""
         try:
             data = json.loads(output)
         except json.JSONDecodeError:
@@ -224,7 +238,7 @@ class WellChatAgent:
         lang = data.get("language") if data.get("language") in ("id", "en") else "id"
 
         if status == "answered" and not trace:
-            # guardrail: an answer that never touched the data cannot be grounded
+            # guardrail: jawaban yang tidak pernah menyentuh data tidak mungkin berdasar dokumen
             status = "out_of_scope"
         if status == "out_of_scope":
             return ChatResult("out_of_scope", REFUSAL[lang], [], lang, tool_calls=trace)
@@ -237,7 +251,7 @@ class WellChatAgent:
             if s.get("file") in valid and (s["file"], s.get("page")) not in seen:
                 seen.add((s["file"], s.get("page")))
                 sources.append(s)
-        if not sources:  # model forgot to cite: fall back to what the tools returned
+        if not sources:  # model lupa mencantumkan sumber: pakai file yang dikembalikan tool
             sources = [{"file": f, "page": min(p) if p else None, "section": "retrieved"} for f, p in consulted.items() if f in valid]
         if not sources:
             return ChatResult("not_found", NOT_FOUND[lang], [], lang, tool_calls=trace)
