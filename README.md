@@ -1,6 +1,6 @@
 # Well Data Chat
 
-Aplikasi chat yang menjawab pertanyaan **hanya** dari laporan sumur (PDF *Daily Operation Report* / DDR dan *Daily Geological Operations Summary* / DGOS) serta glosarium istilah Oil & Gas (`Glossaries.docx`). Pertanyaan di luar cakupan ditolak dengan pesan baku, dan setiap jawaban menyertakan file sumber beserta halamannya.
+Well Data Chat adalah aplikasi chat yang saya buat untuk menjawab pertanyaan **hanya** dari laporan sumur (PDF *Daily Operation Report* / DDR dan *Daily Geological Operations Summary* / DGOS) serta glosarium istilah Oil & Gas (`Glossaries.docx`). Kalau pertanyaannya di luar cakupan, aplikasi menolak dengan pesan baku. Setiap jawaban selalu menyertakan file sumber beserta halamannya.
 
 ```
 PDF/DOCX ──► parser (pdfplumber, python-docx) ──► JSON per file ──► SQLite + FTS5
@@ -28,9 +28,9 @@ PDF/DOCX ──► parser (pdfplumber, python-docx) ──► JSON per file ─�
 
 ## 1. Prasyarat
 
-- Python **3.10 atau lebih baru** (dikembangkan dan diuji dengan Python 3.13).
+- Python **3.10 atau lebih baru**. Pengujian terakhir saya jalankan di Python 3.14 (detailnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md)).
 - API key OpenAI. Penyedia lain yang kompatibel dengan OpenAI API juga bisa dipakai, lihat [Konfigurasi](#3-konfigurasi).
-- Tidak perlu Docker atau database server. SQLite sudah termasuk di Python.
+- Tidak perlu Docker atau database server, karena SQLite sudah bawaan Python.
 
 ## 2. Instalasi
 
@@ -57,17 +57,49 @@ Isi `OPENAI_API_KEY` di `.env`. Variabel lainnya opsional:
 
 | Variabel | Default | Keterangan |
 |---|---|---|
-| `OPENAI_API_KEY` | (wajib) | Key OpenAI milik reviewer. |
+| `OPENAI_API_KEY` | (wajib) | API key OpenAI milik reviewer. |
 | `OPENAI_MODEL` | `gpt-5.4-mini` | Model apa pun yang mendukung *tool calling* dan *structured output* (JSON schema). |
-| `OPENAI_REASONING_EFFORT` | `none` | Hanya dikirim ke model *reasoning* (`gpt-5*`, `o*`). Untuk `gpt-5.4-mini`, Chat Completions menolak *tool calling* dengan effort selain `none`. Kosongkan untuk tidak mengirim. |
-| `OPENAI_BASE_URL` | (kosong) | Isi untuk memakai endpoint lain yang kompatibel dengan OpenAI (Azure OpenAI, OpenRouter, vLLM/Ollama lokal). Key yang dibutuhkan adalah key dari penyedia tersebut, diisi di `OPENAI_API_KEY`. |
+| `OPENAI_REASONING_EFFORT` | `none` | Hanya dikirim ke model *reasoning* (`gpt-5*`, `o*`). Untuk `gpt-5.4-mini`, Chat Completions menolak *tool calling* dengan effort selain `none`. Kosongkan kalau tidak ingin dikirim. |
+| `OPENAI_BASE_URL` | (kosong) | Isi kalau ingin memakai endpoint lain yang kompatibel dengan OpenAI (Azure OpenAI, OpenRouter, vLLM/Ollama lokal). Dalam hal ini, `OPENAI_API_KEY` diisi dengan key dari penyedia tersebut. |
+| `ANSWER_DEADLINE_S` | `150` | Batas waktu (detik) untuk satu jawaban, termasuk semua putaran *tool*. Putaran *tool* berhenti lebih awal supaya jawaban akhir tetap selesai dalam batas ini. |
+| `FINAL_ROUND_RESERVE_S` | `30` | Waktu yang disisihkan khusus untuk jawaban akhir; tidak dipakai putaran *tool*. |
+| `MAX_TOOL_RESULT_CHARS` | `14000` | Batas karakter satu hasil *tool* sebelum dipangkas. Hasil yang dipangkas tetap JSON valid: item list dibuang dari belakang, dan bila tetap kepanjangan teksnya dipotong lalu dibungkus. Naikkan bila model punya *context window* besar, turunkan bila permintaan terasa lambat. |
 | `DATA_DIR`, `RAW_DIR`, `PARSED_DIR`, `DB_PATH` | `./data`, `./data/raw`, `./data/parsed`, `./data/wellchat.db` | Lokasi data. |
 
-API key tidak pernah disimpan di repositori: `.env` ada di `.gitignore`.
+API key tidak pernah masuk ke repositori karena `.env` sudah ada di `.gitignore`.
+
+### Memakai penyedia LLM selain OpenAI
+
+Aplikasi ini memanggil **Chat Completions API yang kompatibel dengan OpenAI**. Endpoint default adalah `api.openai.com`; bila Anda memakai penyedia lain, cukup isi `OPENAI_BASE_URL` dan `OPENAI_MODEL`, lalu isi `OPENAI_API_KEY` **dengan key milik penyedia tersebut** (bukan key OpenAI).
+
+Contoh konfigurasi yang sudah teruji:
+
+```bash
+OPENAI_API_KEY=<key milik penyedia Anda>
+OPENAI_BASE_URL=https://<host-penyedia>/v1
+OPENAI_MODEL=<nama model di penyedia tersebut>
+```
+
+Yang dibutuhkan dari model/penyedia:
+
+- Mendukung **tool calling** (function calling).
+- Mendukung **structured output** ber-JSON schema (dipakai untuk menegakkan status jawaban dan sitasi).
+- Kompatibel dengan pustaka `openai` Python (endpoint bergaya `/v1/chat/completions`).
+
+Apa yang perlu disesuaikan bila penyedia berbeda:
+
+| Situasi | Yang dilakukan |
+|---|---|
+| Model bukan model *reasoning* | `OPENAI_REASONING_EFFORT` diabaikan dan `temperature=0` dikirim. |
+| Model *reasoning* (`gpt-5*`, `o*`) | Set `OPENAI_REASONING_EFFORT` sesuai yang didukung; beberapa model menolak *tool calling* bila effort tidak sesuai. |
+| Endpoint atau payload error | Pesan aslinya ditampilkan di UI/CLI, bukan ditelan. |
+| Respons terasa lambat | Turunkan `ANSWER_DEADLINE_S` atau `MAX_TOOL_RESULT_CHARS`. |
+
+Catatan: pengembangan dan evaluasi terakhir dijalankan memakai endpoint kompatibel non-OpenAI (`OPENAI_BASE_URL` diisi), dengan hasil 23/23 pada set pertanyaan uji internal. Konfigurasi OpenAI langsung juga tetap didukung — cukup kosongkan `OPENAI_BASE_URL`.
 
 ## 4. Meletakkan dataset
 
-Dataset dan hasil parsing **tidak** ada di repositori. Salin folder `Datasets` dan file `Glossaries.docx` ke `data/raw/`:
+Dataset dan hasil parsing sengaja **tidak** saya masukkan ke repositori. Salin folder `Datasets` dan file `Glossaries.docx` ke `data/raw/`:
 
 ```
 data/raw/
@@ -81,7 +113,7 @@ data/raw/
 └── Glossaries.docx
 ```
 
-Nama subfolder dan nama file bebas. Parser membaca semua `*.pdf` dan `*.docx` di bawah `data/raw/` secara rekursif, dan jenis laporan dikenali dari isi halaman pertama, bukan dari nama file.
+Nama subfolder dan nama file bebas. Parser membaca semua `*.pdf` dan `*.docx` di bawah `data/raw/` secara rekursif, lalu mengenali jenis laporan dari isi halaman pertamanya, bukan dari nama file.
 
 Hasil parsing ditulis ke:
 
@@ -111,23 +143,23 @@ Contoh keluaran `ingest`:
 Done: {'parsed': 5, 'skipped': 0, 'failed': 0, 'removed': 0, 'documents': 5}
 ```
 
-Di UI, setiap jawaban menampilkan daftar sumber (nama file, halaman, bagian laporan) dengan tombol untuk mengunduh PDF aslinya, serta waktu respons.
+Di UI, setiap jawaban menampilkan waktu respons dan daftar sumber (nama file, halaman, bagian laporan), lengkap dengan tombol untuk mengunduh PDF aslinya.
 
 ## 6. Menambah PDF baru
 
 Tidak ada kode yang perlu diubah:
 
 1. Letakkan PDF baru (format DDR atau DGOS yang serupa) di mana saja di bawah `data/raw/`.
-2. Jalankan `python -m wellchat.ingest`. Hanya file baru atau yang berubah yang diparsing ulang (dicek dengan SHA-256). `--force` memparsing ulang semuanya.
-3. Langsung tanyakan lewat chat. Aplikasi membaca database pada setiap pertanyaan, jadi tidak perlu restart.
+2. Jalankan `python -m wellchat.ingest`. Hanya file baru atau yang berubah yang diparsing ulang (dicek lewat SHA-256). Pakai `--force` untuk memparsing ulang semuanya.
+3. Langsung bertanya lewat chat. Aplikasi membuka database baru di setiap pertanyaan, jadi tidak perlu restart.
 
-Alternatif di UI: sidebar **Tambah PDF/DOCX baru**, lalu **Simpan & parse file baru**. File disimpan ke `data/raw/uploads/` dan langsung diindeks. Tombol **Parse ulang folder data** menjalankan ingest untuk file yang disalin manual.
+Cara lain lewat UI: buka sidebar **Tambah PDF/DOCX baru**, lalu klik **Simpan & parse file baru**. File akan disimpan ke `data/raw/uploads/` dan langsung diindeks. Tombol **Parse ulang folder data** menjalankan ingest untuk file yang disalin manual.
 
-PDF yang tidak dikenali sebagai DDR/DGOS tetap diparsing sebagai `UNKNOWN`: teksnya per halaman diindeks sehingga masih bisa ditanyakan, hanya tanpa field terstruktur.
+PDF yang tidak dikenali sebagai DDR/DGOS tetap diparsing sebagai `UNKNOWN`. Teks per halamannya tetap diindeks sehingga masih bisa ditanyakan, hanya saja tanpa field terstruktur.
 
 ## 7. Struktur JSON hasil parsing
 
-Satu file JSON per dokumen sumber. Field umum untuk semua laporan PDF:
+Setiap dokumen sumber menghasilkan satu file JSON. Field umum untuk semua laporan PDF:
 
 | Field | Tipe | Keterangan |
 |---|---|---|
@@ -135,15 +167,15 @@ Satu file JSON per dokumen sumber. Field umum untuk semua laporan PDF:
 | `source` | object | `file_name`, `relative_path` (relatif ke `data/raw`), `sha256`, `page_count`. |
 | `parsed_at` | string | Waktu parsing (ISO 8601, UTC). |
 | `doc_type` | string | `DDR`, `DGOS`, `UNKNOWN`, atau `GLOSSARY`. |
-| `well_name`, `report_no` | string \| null | Dari header laporan. |
-| `report_date` | string \| null | Tanggal laporan, ISO `yyyy-mm-dd`. |
-| `fields` | array | Field header `Label : value`: `{key, label, value, page}`. Nilai disimpan persis seperti di PDF (termasuk satuan). |
+| `well_name`, `report_no` | string \| null | Diambil dari header laporan. |
+| `report_date` | string \| null | Tanggal laporan, format ISO `yyyy-mm-dd`. |
+| `fields` | array | Field header `Label : value`: `{key, label, value, page}`. Nilai disimpan persis seperti di PDF, termasuk satuannya. |
 | `sections` | array | Blok teks per bagian laporan: `{name, pages, text}`. |
 | `warnings` | array of string | Masalah kualitas data yang terdeteksi saat parsing. |
-| `pages` | array | Teks bersih per halaman `{page, text}`. Cadangan bila struktur gagal dikenali. |
+| `pages` | array | Teks bersih per halaman `{page, text}`, sebagai cadangan kalau struktur gagal dikenali. |
 
-Khusus **DDR**: `operations` (baris tabel *Operation Summary*), `next_day_operations` (update 00:00–06:00 hari berikutnya), `derived.npt_hours_from_operation_rows`.
-Khusus **DGOS**: `npt` (baris NPT di blok *Last 24 hrs*), `progress` (phase/AFE/mud), `daily_remarks`, `tables` (Drilling Summary/Casing, Formation Tops).
+Khusus **DDR**: `operations` (baris tabel *Operation Summary*), `next_day_operations` (update 00:00–06:00 hari berikutnya), dan `derived.npt_hours_from_operation_rows`.
+Khusus **DGOS**: `npt` (baris NPT di blok *Last 24 hrs*), `progress` (phase/AFE/mud), `daily_remarks`, dan `tables` (Drilling Summary/Casing, Formation Tops).
 Khusus **GLOSSARY**: `entries` menggantikan `fields`/`sections`.
 
 ### Contoh DDR (data dummy)
@@ -192,6 +224,8 @@ Khusus **GLOSSARY**: `entries` menggantikan `fields`/`sections`.
 }
 ```
 
+`md_from_m` bernilai `null` kalau kolom MD di laporan kosong (`-`).
+
 ### Contoh DGOS (data dummy, field khusus saja)
 
 ```json
@@ -239,7 +273,7 @@ Khusus **GLOSSARY**: `entries` menggantikan `fields`/`sections`.
 
 ## 8. Database SQLite
 
-Database (`data/wellchat.db`) adalah indeks turunan: dibangun ulang dari `data/parsed/*.json` pada setiap `ingest`, lalu ditukar secara atomik sehingga aplikasi yang sedang berjalan tidak pernah membaca database setengah jadi. Aman dihapus kapan saja.
+Database (`data/wellchat.db`) hanyalah indeks turunan. Setiap kali `ingest` dijalankan, database dibangun ulang dari `data/parsed/*.json`, lalu ditukar secara atomik supaya aplikasi yang sedang berjalan tidak pernah membaca database yang setengah jadi. File ini aman dihapus kapan saja.
 
 | Tabel | Isi |
 |---|---|
@@ -247,7 +281,7 @@ Database (`data/wellchat.db`) adalah indeks turunan: dibangun ulang dari `data/p
 | `fields` | Field header per laporan (`Cumm NPT`, `COUNTRY`, ...). |
 | `sections` | Teks per bagian laporan. |
 | `operations` | Baris *Operation Summary* DDR, termasuk flag NPT. |
-| `report_tables` | Tabel DGOS (casing, formation tops) sebagai JSON. |
+| `report_tables` | Tabel DGOS (casing, formation tops) dalam bentuk JSON. |
 | `glossary` | Entri glosarium. |
 | `chunks` + `chunks_fts` | Potongan teks untuk pencarian full-text FTS5 (BM25). |
 
@@ -256,18 +290,29 @@ Database (`data/wellchat.db`) adalah indeks turunan: dibangun ulang dari `data/p
 ```bash
 pip install -r requirements-dev.txt
 
-# Unit test parser, store, tool, dan guardrail agen (tanpa API key; LLM dipalsukan)
+# Unit test parser, store, tool, dan guardrail agen (tanpa API key; LLM-nya dipalsukan)
 python -m pytest -q
 
-# Evaluasi end-to-end dengan LLM sungguhan (butuh API key + data sudah di-ingest)
+# Evaluasi end-to-end dengan LLM sungguhan (butuh API key dan data yang sudah di-ingest)
 python -m eval.run_eval
 ```
 
-- `tests/test_parsers.py`: memeriksa hasil parsing dataset asli (di-skip bila `data/raw` kosong).
-- `tests/test_synthetic.py`: membuat PDF baru dengan layout serupa tetapi nilai berbeda (nama sumur, tanggal, NPT), lalu memastikan semuanya terparsing dan bisa dicari. Ini bukti bahwa parser tidak terikat pada file contoh.
-- `tests/test_agent.py`: memeriksa loop agen dan guardrail dengan LLM palsu (penolakan baku, jawaban tanpa tool dianggap di luar cakupan, sumber halusinasi dibuang, pertanyaan tentang *offset well*).
-- `tests/test_tools.py`: memeriksa tool yang dipanggil LLM, misalnya rencana operasi dari semua laporan dan daftar sumur.
-- `eval/questions.json`: 23 pertanyaan uji (3 contoh dari soal, pertanyaan faktual lain, glosarium, di luar cakupan). `run_eval` mengukur akurasi dan waktu respons, lalu menulis `eval/results.md`.
+Isi test suite:
+
+- `tests/test_parsers.py`: memeriksa hasil parsing dataset asli (di-skip kalau `data/raw` kosong), ditambah kasus baris operasi DDR dengan MD bulat atau kosong dan laporan tanpa heading `BIT DATA`.
+- `tests/test_synthetic.py`: membuat PDF baru dengan layout serupa tetapi nilai berbeda (nama sumur, tanggal, NPT), lalu memastikan semuanya terparsing dan bisa dicari. Test ini yang saya pakai sebagai bukti bahwa parser tidak terikat pada file contoh.
+- `tests/test_agent.py`: memeriksa loop agen dan guardrail dengan LLM palsu: penolakan baku, jawaban tanpa tool dianggap di luar cakupan, sumber halusinasi dibuang, pertanyaan tentang *offset well*, serta batas waktu jawaban.
+- `tests/test_tools.py`: memeriksa tool yang dipanggil LLM, misalnya rencana operasi dari semua laporan, daftar sumur, dan hasil tool yang terlalu panjang tetap berupa JSON valid.
+- `eval/questions.json`: 23 pertanyaan uji (3 contoh dari soal, pertanyaan faktual lain, glosarium, dan di luar cakupan). `run_eval` mengukur akurasi dan waktu respons, lalu menulis hasilnya ke `eval/results.md`.
+
+### Ringkasan hasil di mesin saya
+
+| Pengujian | Hasil |
+|---|---|
+| Unit test (`pytest`) | **28/28 lulus** dalam ±4 detik |
+| Evaluasi end-to-end (`eval.run_eval`) | **23/23 lulus**, respons paling lambat **11,1 detik**, rata-rata 5,6 detik (batas 180 detik) |
+
+Lingkungan pengujian, rincian per pertanyaan, dan catatan dari beberapa kali run ada di **[HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md)**.
 
 ---
 
@@ -275,12 +320,13 @@ python -m eval.run_eval
 
 ### Pendekatan
 
-Masalahnya adalah tanya jawab faktual atas sedikit dokumen semi-terstruktur: angka, tanggal, kode, dan nama yang muncul literal di laporan. Akurasi ditentukan oleh dua hal: (1) kualitas ekstraksi dari PDF dan (2) kemampuan model menemukan field yang tepat dan tidak mengarang. Karena itu desainnya:
+Inti masalahnya adalah tanya jawab faktual atas sedikit dokumen semi-terstruktur: angka, tanggal, kode, dan nama yang tertulis apa adanya di laporan. Menurut saya akurasinya ditentukan oleh dua hal: (1) kualitas ekstraksi dari PDF, dan (2) kemampuan model menemukan field yang tepat tanpa mengarang. Karena itu desain saya seperti ini:
 
-1. **Parser berbasis label dan heading, bukan posisi.** DDR dan DGOS adalah formulir dengan label tetap (`Cumm NPT :`, `COUNTRY :`, `NEXT 24 HRS OPERATION`). Parser mencari label tersebut, sehingga PDF baru dengan format serupa tetapi isi dan panjang berbeda tetap terbaca. Teks bersih per halaman selalu disimpan sebagai cadangan.
+1. **Parser berbasis label dan heading, bukan posisi.** DDR dan DGOS adalah formulir dengan label tetap (`Cumm NPT :`, `COUNTRY :`, `NEXT 24 HRS OPERATION`). Parser mencari label tersebut, jadi PDF baru dengan format serupa tetapi isi dan panjang berbeda tetap terbaca. Teks bersih per halaman selalu ikut disimpan sebagai cadangan.
 2. **JSON sebagai sumber kebenaran, SQLite sebagai indeks.** JSON memenuhi syarat penyimpanan dan mudah diperiksa manusia. SQLite (nilai tambah) memberi query terstruktur dan pencarian full-text tanpa setup tambahan.
-3. **Agen dengan tool, bukan RAG vektor sekali ambil.** LLM memanggil tool read-only (`list_reports`, `get_report_fields`, `get_planned_operations`, `search_reports`, `read_report_section`, `lookup_glossary`) sebanyak yang dibutuhkan, lalu menjawab dengan sitasi. Untuk pertanyaan seperti "berapa total NPT", model bisa mengambil field yang sama dari semua laporan sekaligus dan membandingkannya.
-4. **Guardrail di kode, bukan hanya di prompt.** Output model dibatasi JSON schema (`status`, `answer`, `sources`). Pesan penolakan adalah teks tetap dari aplikasi sehingga konsisten. Jawaban yang tidak didahului pemanggilan tool otomatis dianggap di luar cakupan, sumber yang tidak ada di database dibuang, dan pertanyaan yang hanya menyebut *offset well* (sumur tanpa laporan, misalnya TAPIS-F) langsung dijawab "tidak ditemukan" tanpa memanggil LLM.
+3. **Agen dengan tool, bukan RAG vektor yang mengambil konteks sekali saja.** LLM memanggil tool read-only (`list_reports`, `get_report_fields`, `get_planned_operations`, `search_reports`, `read_report_section`, `lookup_glossary`) sebanyak yang dibutuhkan, lalu menjawab dengan sitasi. Untuk pertanyaan seperti "berapa total NPT", model bisa mengambil field yang sama dari semua laporan sekaligus lalu membandingkannya.
+4. **Guardrail di kode, bukan hanya di prompt.** Output model dibatasi JSON schema (`status`, `answer`, `sources`). Pesan penolakan berupa teks tetap dari aplikasi, sehingga selalu konsisten. Jawaban yang tidak didahului pemanggilan tool otomatis dianggap di luar cakupan, sumber yang tidak ada di database dibuang, dan pertanyaan yang hanya menyebut *offset well* (sumur tanpa laporan, misalnya TAPIS-F) langsung dijawab "tidak ditemukan" tanpa memanggil LLM.
+5. **Batas waktu ditegakkan di kode.** Satu jawaban dibatasi 150 detik, jauh di bawah syarat 3 menit. Kalau waktunya hampir habis, agen berhenti memanggil tool dan langsung menyusun jawaban dari data yang sudah didapat.
 
 ### Arsitektur
 
@@ -288,14 +334,14 @@ Masalahnya adalah tanya jawab faktual atas sedikit dokumen semi-terstruktur: ang
 wellchat/
 ├── pdf_text.py         ekstraksi teks bersih (buang teks putih tersembunyi & karakter ganda)
 ├── parsers/
-│   ├── ddr.py          Daily Operation Report: header, status, operation rows, NPT, warnings
+│   ├── ddr.py          Daily Operation Report: header, status, baris operasi, NPT, warnings
 │   ├── dgos.py         DGOS: header, blok operasi, NPT, remarks, tabel casing & formation tops
 │   ├── glossary.py     tabel 2 kolom di .docx -> entri istilah
 │   └── __init__.py     deteksi jenis dokumen + fallback UNKNOWN
 ├── ingest.py           CLI: raw -> JSON (inkremental, SHA-256) -> SQLite
 ├── store.py            skema SQLite + FTS5, rebuild atomik
 ├── tools.py            tool read-only untuk LLM, setiap hasil membawa file + halaman
-├── agent.py            loop tool-calling OpenAI, structured output, guardrail
+├── agent.py            loop tool-calling OpenAI, structured output, guardrail, batas waktu
 └── cli.py              chat di terminal
 app.py                  UI Streamlit
 eval/                   pertanyaan uji + skrip evaluasi
@@ -304,37 +350,39 @@ tests/                  unit test (parser, PDF sintetis, agen dengan LLM palsu)
 
 ### Alasan pemilihan teknologi
 
-| Pilihan | Alasan | Alternatif yang tidak dipilih |
+| Pilihan | Alasan | Alternatif yang tidak saya pilih |
 |---|---|---|
-| **pdfplumber** | Akses ke properti tiap karakter (warna, posisi) dibutuhkan untuk membuang label putih tersembunyi; ringan, murni Python, tanpa unduhan model. | Docling/Marker: lebih kuat untuk layout acak, tetapi instalasinya berat (model ML lokal) dan menambah risiko gagal di mesin reviewer. PyPDF: tidak memberi info warna karakter. |
-| **SQLite + FTS5** | Bawaan Python, tanpa server, mendukung query terstruktur dan BM25. | Vector DB / embedding: pertanyaan di sini berupa fakta literal (angka, kode seperti `PEX-QAIT`) yang lebih cocok dengan pencarian leksikal; embedding menambah biaya dan dependensi tanpa jelas menambah akurasi pada korpus sekecil ini. |
-| **OpenAI Chat Completions + tool calling + JSON schema** | Key disediakan; tool calling memberi kontrol atas data apa yang dilihat model; structured output membuat penolakan dan sitasi bisa ditegakkan di kode. `OPENAI_BASE_URL` membuka opsi penyedia lain. | Framework orkestrasi (LangChain/LlamaIndex): menambah lapisan abstraksi untuk loop yang cukup ditulis dalam satu file kecil (`agent.py`). |
-| **Streamlit** | UI chat lengkap dengan satu file Python dan satu perintah. | FastAPI + frontend terpisah: lebih fleksibel, tetapi dua proses dan lebih banyak langkah untuk reviewer. |
+| **pdfplumber** | Saya butuh akses ke properti tiap karakter (warna, posisi) untuk membuang label putih tersembunyi. Library-nya ringan, murni Python, dan tidak perlu mengunduh model. | Docling/Marker: lebih kuat untuk layout acak, tetapi instalasinya berat (model ML lokal) dan menambah risiko gagal di mesin reviewer. PyPDF: tidak memberi informasi warna karakter. |
+| **SQLite + FTS5** | Bawaan Python, tanpa server, dan sudah mendukung query terstruktur serta BM25. | Vector DB / embedding: pertanyaan di sini berupa fakta literal (angka, kode seperti `PEX-QAIT`) yang lebih cocok dengan pencarian leksikal. Embedding menambah biaya dan dependensi tanpa jaminan akurasinya naik untuk korpus sekecil ini. |
+| **OpenAI Chat Completions + tool calling + JSON schema** | Key-nya disediakan. Tool calling memberi saya kontrol atas data apa saja yang dilihat model, dan structured output membuat penolakan serta sitasi bisa ditegakkan di kode. `OPENAI_BASE_URL` membuka opsi penyedia lain. | Framework orkestrasi (LangChain/LlamaIndex): menambah lapisan abstraksi untuk loop yang cukup ditulis dalam satu file kecil (`agent.py`). |
+| **Streamlit** | UI chat lengkap cukup dengan satu file Python dan satu perintah. | FastAPI + frontend terpisah: lebih fleksibel, tetapi butuh dua proses dan lebih banyak langkah untuk reviewer. |
 
 ---
 
 ## 11. Resolution
 
-### Kendala dan penyelesaian
+### Kendala dan cara saya menyelesaikannya
 
-1. **Teks PDF rusak karena label tersembunyi.** DGOS memuat label berwarna putih yang ditumpuk di atas nilai, sehingga ekstraksi biasa menghasilkan `Cu1r0r-e0n9t- 2D0a2t6e` (seharusnya `Current Date : 10-09-2026`) dan `NNNPPPTTT`. *Solusi:* filter karakter berdasarkan warna (`non_stroking_color` putih) dan ukuran, lalu `dedupe_chars` untuk teks "fake bold" yang digambar dua kali. Diuji di `test_dgos_hidden_white_labels_are_removed`.
-2. **Satu baris berisi banyak pasangan label–nilai** (`DOL : 50.04 days MD : 2,423.11 m Rotating Hrs : ...`), kadang dengan nilai kosong. *Solusi:* pemisah berbasis daftar label yang dicocokkan dari label terpanjang, sehingga `Cum Rot Hrs` tidak terpotong menjadi `Rot Hrs`.
-3. **Tabel DGOS terdeteksi sebagai satu grid besar satu halaman.** *Solusi:* tabel logis diambil sebagai rangkaian baris setelah sel heading (`HOLE SIZE`, `FORMATION TOPS`), kolom kosong di semua baris dibuang, lalu dipetakan ke nama kolom.
-4. **Baris operasi DDR berlanjut lintas halaman** dan diikuti update 00:00–06:00 hari berikutnya dalam sel yang sama. *Solusi:* state machine per baris: baris berawalan rentang waktu memulai entri baru, baris lain disambung ke entri aktif, header/footer halaman dibuang, dan blok tanggal hari berikutnya disimpan terpisah di `next_day_operations`.
-5. **Nilai berbeda antar laporan.** Laporan harian adalah potret per tanggal. Contohnya NPT: DDR #32 (19/07/2026) mencatat *Cumm NPT* 1.50 hr, DDR #53 (09/08/2026) mencatat 41.25 hr, dan DGOS #84 (10/09/2026) mencatat NPT harian 1.50 hr (redress Saturn packer) + 0.75 hr (WOW). Satu angka "total NPT" tanpa konteks akan menyesatkan. *Solusi:* tool `get_report_fields` mengembalikan field yang sama dari semua laporan, dan prompt mewajibkan jawaban menyebut nilai per laporan beserta tanggal dan laporan terbaru.
-6. **Data sumber tidak konsisten.** Kedua DDR menulis *Spud date* `27/06/2027`, sesudah tanggal laporannya, sementara DGOS menulis `27-06-2026`. *Solusi:* nilai tidak dikoreksi diam-diam; parser menambahkan `warnings` yang diteruskan ke model dan ditampilkan di UI.
-7. **Istilah glosarium yang belum pasti** (`BMP`, `COB`, `CSS`, entri bertanda *to be confirmed*). *Solusi:* flag `to_be_confirmed` di JSON; model diinstruksikan menyampaikannya sebagai belum pasti.
+1. **Teks PDF rusak karena label tersembunyi.** DGOS memuat label berwarna putih yang ditumpuk di atas nilai, sehingga ekstraksi biasa menghasilkan `Cu1r0r-e0n9t- 2D0a2t6e` (seharusnya `Current Date : 10-09-2026`) dan `NNNPPPTTT`. *Solusi:* saya menyaring karakter berdasarkan warna (`non_stroking_color` putih) dan ukuran, lalu memakai `dedupe_chars` untuk teks "fake bold" yang digambar dua kali. Kasus ini diuji di `test_dgos_hidden_white_labels_are_removed`.
+2. **Satu baris berisi banyak pasangan label–nilai** (`DOL : 50.04 days MD : 2,423.11 m Rotating Hrs : ...`), kadang dengan nilai kosong. *Solusi:* pemisah berbasis daftar label yang dicocokkan mulai dari label terpanjang, supaya `Cum Rot Hrs` tidak terpotong menjadi `Rot Hrs`.
+3. **Tabel DGOS terdeteksi sebagai satu grid besar selebar halaman.** *Solusi:* tabel logis saya ambil sebagai rangkaian baris setelah sel heading (`HOLE SIZE`, `FORMATION TOPS`). Kolom yang kosong di semua baris dibuang, lalu sisanya dipetakan ke nama kolom.
+4. **Baris operasi DDR berlanjut lintas halaman**, dan di sel yang sama diikuti update 00:00–06:00 hari berikutnya. *Solusi:* state machine per baris. Baris yang diawali rentang waktu memulai entri baru, baris lain disambung ke entri yang sedang aktif, header/footer halaman dibuang, dan blok tanggal hari berikutnya disimpan terpisah di `next_day_operations`. Tabel dianggap selesai di heading berikutnya mana pun, dan kolom MD boleh bulat atau kosong, supaya PDF dengan variasi kecil tidak kehilangan baris diam-diam.
+5. **Nilai berbeda antar laporan.** Laporan harian adalah potret per tanggal. Contohnya NPT: DDR #32 (19/07/2026) mencatat *Cumm NPT* 1.50 hr, DDR #53 (09/08/2026) mencatat 41.25 hr, dan DGOS #84 (10/09/2026) mencatat NPT harian 1.50 hr (redress Saturn packer) + 0.75 hr (WOW). Satu angka "total NPT" tanpa konteks akan menyesatkan. *Solusi:* tool `get_report_fields` mengembalikan field yang sama dari semua laporan, dan prompt mewajibkan jawaban menyebut nilai per laporan beserta tanggalnya, lalu menunjukkan laporan yang terbaru.
+6. **Data sumber tidak konsisten.** Kedua DDR menulis *Spud date* `27/06/2027`, sesudah tanggal laporannya sendiri, sementara DGOS menulis `27-06-2026`. Saya sudah mengecek posisi teks di PDF: nilai itu memang berada tepat di bawah label *Spud date* (kolom *End date* kosong), jadi ini bukan kesalahan pemetaan kolom. *Solusi:* nilainya tidak saya koreksi diam-diam. Parser menambahkan `warnings` yang diteruskan ke model dan ditampilkan di UI.
+7. **Istilah glosarium yang belum pasti** (`BMP`, `COB`, `CSS`, entri bertanda *to be confirmed*). *Solusi:* flag `to_be_confirmed` di JSON, dan model diinstruksikan menyampaikannya sebagai informasi yang belum pasti.
 8. **Menjaga jawaban tetap di dalam dokumen.** *Solusi:* penolakan ditegakkan di kode (lihat Planning poin 4) dan diuji dengan LLM palsu di `tests/test_agent.py`.
+9. **Hasil tool yang terlalu panjang.** Pencarian dengan `limit` besar bisa melewati batas 14.000 karakter. Versi awal memotong string JSON mentah sehingga hasilnya rusak. *Solusi:* hasil yang kepanjangan dipangkas per item (item terakhir dibuang dulu), jadi model tetap menerima JSON yang valid dan sitasi item yang tersisa tetap utuh.
+10. **Waktu respons harus terjamin, bukan kebetulan cepat.** Sebelumnya jumlah putaran tool dibatasi, tetapi waktunya tidak, sehingga kalau API lambat, satu jawaban secara teori bisa makan belasan menit. *Solusi:* batas waktu 150 detik per jawaban, 30 detik di antaranya disisihkan untuk jawaban akhir, dan timeout per request ikut menghitung retry SDK.
 
 ### Hasil evaluasi
 
-Jalankan `python -m eval.run_eval`; hasil terbaru tersimpan di `eval/results.md` (akurasi per pertanyaan dan waktu respons, batas 180 detik).
+Di mesin saya, evaluasi terakhir lulus **23/23** dengan respons paling lambat **11,1 detik** (batas 180 detik). Rinciannya ada di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md). Untuk mengulanginya, jalankan `python -m eval.run_eval`; hasil terbaru akan ditulis ke `eval/results.md`.
 
 ### Rencana perbaikan ke depan
 
-- **Parser hybrid untuk layout yang lebih bervariasi:** fallback ke Docling atau model vision bila field wajib gagal ditemukan, dengan skor kepercayaan per field.
-- **Normalisasi nilai:** simpan juga angka dan satuan terpisah (`41.25`, `hr`) supaya agregasi lintas laporan (misalnya total biaya per bulan) bisa dihitung dengan SQL, bukan oleh LLM.
-- **Pencarian hybrid:** tambah embedding di samping BM25 untuk pertanyaan parafrase yang tidak memakai istilah laporan.
-- **Evaluasi yang lebih besar:** perluas set pertanyaan dari laporan baru, ukur secara otomatis di CI, dan lacak regresi per perubahan prompt atau parser.
-- **Multi-sumur:** filter per sumur di UI dan tool, bila dataset berisi lebih dari satu sumur.
-- **Streaming jawaban** di UI untuk respons yang terasa lebih cepat.
+- **Parser hybrid untuk layout yang lebih bervariasi:** fallback ke Docling atau model vision kalau field wajib gagal ditemukan, dengan skor kepercayaan per field.
+- **Normalisasi nilai:** simpan juga angka dan satuan secara terpisah (`41.25`, `hr`), supaya agregasi lintas laporan (misalnya total biaya per bulan) bisa dihitung dengan SQL, bukan oleh LLM.
+- **Pencarian hybrid:** tambahkan embedding di samping BM25 untuk pertanyaan parafrase yang tidak memakai istilah laporan.
+- **Evaluasi yang lebih besar:** perluas set pertanyaan dari laporan baru, jalankan otomatis di CI, dan pantau regresi setiap kali prompt atau parser berubah.
+- **Multi-sumur:** filter per sumur di UI dan di tool, kalau dataset berisi lebih dari satu sumur.
+- **Streaming jawaban** di UI supaya respons terasa lebih cepat.
