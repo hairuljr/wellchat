@@ -1,0 +1,17 @@
+# secrets
+.env
+
+# dataset and parsing output are never committed
+data/*
+!data/README.md
+
+# python / tooling
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.streamlit/secrets.toml
+
+# eval output (contains excerpts of the dataset)
+eval/results.md
