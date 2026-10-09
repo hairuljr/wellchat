@@ -1,4 +1,4 @@
-"""Parser for the Daily Operation Report (DDR, Daily Drilling Report)."""
+"""Parser untuk Daily Operation Report (DDR, Daily Drilling Report)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from ..pdf_text import PageText, split_labeled_line, to_iso_date
 from .common import Line, collect_labeled_block, flatten, sectionize, snake
 
-# Labels printed as `Label : value` in the report header.
+# Label yang tercetak sebagai `Label : value` di header laporan.
 HEADER_LABELS = [
     "Well", "Wellbore No.", "Report no.", "Report date",
     "Event Description", "Water Depth", "Region", "Rig Name",
@@ -19,16 +19,16 @@ HEADER_LABELS = [
     "Daily NPT", "Cumm NPT", "Current Hole Size", "Expenditure",
 ]
 
-# Labels printed as a column-header row with values on the next line.
+# Label yang tercetak sebagai satu baris judul kolom, dengan nilainya di baris berikutnya.
 COLUMN_LABELS = ["Objective", "Field / Platform", "AFE No.", "Start date", "Spud date", "End date"]
 
 STATUS_LABELS = ["Current status", "24 hr summary", "24 hr forecast", "Incident / Accident", "Remarks"]
 
-# Lines repeated on every page that carry no information.
+# Baris yang berulang di setiap halaman dan tidak membawa informasi.
 DROP = [
     re.compile(r"^PTT PUBLIC COMPANY LIMITED$"),
     re.compile(r"^Daily Operation Report$", re.I),
-    re.compile(r"^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2} \d+$"),  # print stamp + page number
+    re.compile(r"^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2} \d+$"),  # cap waktu cetak + nomor halaman
 ]
 PAGE_HEADER = re.compile(r"^Well:.*Report no\.:.*Report date:", re.I)
 OPS_TABLE_HEADER = [
@@ -59,8 +59,10 @@ HEADINGS = [
 OP_ROW = re.compile(
     r"^(?P<from>\d{1,2}:\d{2})\s*-\s*(?P<to>\d{1,2}:\d{2})\s+(?P<hrs>\d+(?:\.\d+)?)\s+"
     r"(?P<phase>\S+)\s+(?P<activity>\S+)\s+(?P<prod>\S+)\s+(?:(?P<npt>Y|N)\s+)?"
-    r"(?P<rig_status>\S+)\s+(?P<md>[\d,]+\.\d+)\s*(?P<op>.*)$"
+    r"(?P<rig_status>\S+)\s+(?P<md>[\d,]+(?:\.\d+)?|-)\s*(?P<op>.*)$"  # MD bisa bilangan bulat atau kosong ("-")
 )
+# heading apa pun setelah tabel operasi menandai akhir tabel, walau BIT DATA / BHA tidak ada
+OPS_END = [rx for name, rx in HEADINGS if name != "OPERATION SUMMARY"]
 NEXT_DAY_ROW = re.compile(r"^(?P<from>\d{1,2}:\d{2})\s*-\s*(?P<to>\d{1,2}:\d{2})\s*hrs$", re.I)
 NEXT_DAY_DATE = re.compile(r"^(\d{1,2})(st|nd|rd|th)\s+([A-Za-z]+)\s+(\d{4})$")
 SEPARATOR = re.compile(r"^[*_=\-]{6,}$")
@@ -75,7 +77,7 @@ def _header_fields(lines: list[Line]) -> list[dict]:
         for label, value in split_labeled_line(ln.text, HEADER_LABELS).items():
             if label not in fields or (value and not fields[label]["value"]):
                 fields[label] = {"key": snake(label), "label": label, "value": value, "page": ln.page}
-        # column-style header: labels on one line, values on the next
+        # header bergaya kolom: label di satu baris, nilai di baris berikutnya
         if ln.text.startswith("Objective:") and i + 1 < len(lines):
             tokens = lines[i + 1].text.split()
             dates = [t for t in tokens if DATE_TOKEN.match(t)]
@@ -92,8 +94,12 @@ def _header_fields(lines: list[Line]) -> list[dict]:
     return list(fields.values())
 
 
+def _number(text: str) -> float | None:
+    return None if text == "-" else float(text.replace(",", ""))
+
+
 def _operations(lines: list[Line]) -> tuple[list[dict], list[dict]]:
-    """Rows of the OPERATION SUMMARY table plus the 00:00-06:00 next-day updates."""
+    """Baris tabel OPERATION SUMMARY, ditambah update 00:00-06:00 hari berikutnya."""
     ops: list[dict] = []
     next_day: list[dict] = []
     in_ops = False
@@ -106,7 +112,7 @@ def _operations(lines: list[Line]) -> tuple[list[dict], list[dict]]:
             continue
         if not in_ops:
             continue
-        if t.startswith("BIT DATA") or t == "Assembly Components":
+        if any(rx.search(t) for rx in OPS_END):
             break
         if PAGE_HEADER.search(t) or any(rx.search(t) for rx in OPS_TABLE_HEADER):
             continue
@@ -116,7 +122,7 @@ def _operations(lines: list[Line]) -> tuple[list[dict], list[dict]]:
                 "from": m["from"], "to": m["to"], "hours": float(m["hrs"]),
                 "phase": m["phase"], "activity": m["activity"],
                 "productive_code": m["prod"], "npt": m["npt"] == "Y",
-                "rig_status": m["rig_status"], "md_from_m": float(m["md"].replace(",", "")),
+                "rig_status": m["rig_status"], "md_from_m": _number(m["md"]),
                 "operation": m["op"].strip(), "page": ln.page,
             }
             ops.append(current)

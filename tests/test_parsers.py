@@ -2,6 +2,9 @@ import json
 
 import pytest
 
+from wellchat.parsers.common import Line
+from wellchat.parsers.ddr import _operations
+
 
 def _load(parsed_dir, needle):
     files = [p for p in parsed_dir.glob("*.json") if needle in p.name]
@@ -22,7 +25,7 @@ def test_dgos_header_and_location(parsed_dir):
 
 def test_dgos_hidden_white_labels_are_removed(parsed_dir):
     d = _load(parsed_dir, "DGOS_84")
-    assert _field(d, "Current Date") == "10-09-2026"  # not "Cu1r0r-e0n9t- 2D0a2t6e"
+    assert _field(d, "Current Date") == "10-09-2026"  # bukan "Cu1r0r-e0n9t- 2D0a2t6e"
     assert d["npt"].startswith("1.50 hrs due to redressing Saturn packer")
 
 
@@ -46,7 +49,7 @@ def test_ddr_header_and_npt(parsed_dir):
     assert d["doc_type"] == "DDR" and d["report_no"] == "32" and d["report_date"] == "2026-07-19"
     assert _field(d, "Daily NPT") == "1.50 hr" and _field(d, "Cumm NPT") == "1.50 hr"
     assert d["derived"]["npt_hours_from_operation_rows"] == pytest.approx(1.5)
-    assert any("Spud date" in w for w in d["warnings"])  # 27/06/2027 typo in the source
+    assert any("Spud date" in w for w in d["warnings"])  # 27/06/2027, salah ketik di laporan sumber
 
 
 def test_ddr_operations(parsed_dir):
@@ -63,4 +66,17 @@ def test_glossary(parsed_dir):
     terms = {e["term"]: e for e in g["entries"]}
     assert terms["NPT"]["full_form"] == "Non-Productive Time"
     assert terms["BMP"]["to_be_confirmed"] is True
-    assert "A" not in terms  # alphabet divider rows are skipped
+    assert "A" not in terms  # baris pemisah abjad dilewati
+
+
+def test_ddr_operation_rows_without_decimal_md_and_without_bit_data():
+    lines = [Line(1, t) for t in [
+        "OPERATION SUMMARY",
+        "0:00 - 12:00 12.00 D18 DRL OPRN OPRN 1,200 Drill ahead.",
+        "12:00 - 24:00 12.00 D18 RIG OPRN OPRN - Rig service.",
+        "GAS READINGS / MUD VOLUME",  # layout ini tidak punya heading BIT DATA / BHA
+        "Background gas 0.1%",
+    ]]
+    ops, _ = _operations(lines)
+    assert [o["md_from_m"] for o in ops] == [1200.0, None]
+    assert ops[-1]["operation"] == "Rig service."
