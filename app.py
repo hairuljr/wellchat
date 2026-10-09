@@ -7,7 +7,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from wellchat import config
+from wellchat import config, models
 from wellchat.agent import WellChatAgent
 from wellchat.ingest import ingest
 from wellchat.store import open_db
@@ -44,6 +44,27 @@ def source_path(file_name: str, doc_ids: dict[str, str] | None = None) -> Path |
         return None
     p = config.RAW_DIR / doc_id
     return p if p.exists() else None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def endpoint_models(base_url: str | None) -> list[str]:
+    """Daftar model endpoint, di-cache per base URL. Kegagalan tidak di-cache karena exception tidak disimpan."""
+    return models.endpoint_models()
+
+
+def pick_model() -> str:
+    """Model untuk sesi ini: dropdown bila MODEL_ALLOWLIST diisi, selain itu OPENAI_MODEL."""
+    if config.MODEL_ALLOWLIST:
+        try:
+            choices = models.model_choices(endpoint_models(config.OPENAI_BASE_URL))
+        except Exception:
+            choices = []
+        if choices:
+            # key membuat pilihan tersimpan per sesi browser, tidak memengaruhi pengguna lain
+            return st.selectbox("Model", choices, key="model_choice")
+        st.caption("Daftar model tidak bisa diambil atau tidak ada yang cocok dengan MODEL_ALLOWLIST; memakai OPENAI_MODEL.")
+    st.caption(f"Model: `{config.OPENAI_MODEL}`")
+    return config.OPENAI_MODEL
 
 
 def render_sources(sources: list[dict], key: str) -> None:
@@ -93,7 +114,7 @@ with st.sidebar:
         st.rerun()
 
     st.divider()
-    st.caption(f"Model: `{config.OPENAI_MODEL}`")
+    model = pick_model()
     if st.button("Hapus percakapan"):
         st.session_state.messages = []
         st.rerun()
@@ -136,7 +157,7 @@ if question:
         with st.spinner("Mencari di dokumen..."):
             try:
                 with open_db(config.DB_PATH) as conn:
-                    result = WellChatAgent(conn).ask(question, history)
+                    result = WellChatAgent(conn, model=model).ask(question, history)
                 answer, sources = result.answer, result.sources
                 meta = f"{result.status} · {result.seconds}s · {len(result.tool_calls)} tool calls"
             except Exception as exc:  # tampilkan error API/konfigurasi, bukan stack trace

@@ -27,3 +27,6 @@ ANSWER_DEADLINE_S = float(os.getenv("ANSWER_DEADLINE_S", "150"))
 FINAL_ROUND_RESERVE_S = float(os.getenv("FINAL_ROUND_RESERVE_S", "30"))
 # batas karakter hasil satu tool; hasil yang kepanjangan dipangkas agar tetap JSON valid
 MAX_TOOL_RESULT_CHARS = int(os.getenv("MAX_TOOL_RESULT_CHARS", "14000"))
+# Model tambahan yang boleh dipilih di dropdown UI, dipisah koma (opsional).
+# Kosong = tanpa dropdown, aplikasi hanya memakai OPENAI_MODEL.
+MODEL_ALLOWLIST = [m.strip() for m in os.getenv("MODEL_ALLOWLIST", "").split(",") if m.strip()]

@@ -64,6 +64,7 @@ Isi `OPENAI_API_KEY` di `.env`. Variabel lainnya opsional:
 | `ANSWER_DEADLINE_S` | `150` | Batas waktu (detik) untuk satu jawaban, termasuk semua putaran *tool*. Putaran *tool* berhenti lebih awal supaya jawaban akhir tetap selesai dalam batas ini. |
 | `FINAL_ROUND_RESERVE_S` | `30` | Waktu yang disisihkan khusus untuk jawaban akhir; tidak dipakai putaran *tool*. |
 | `MAX_TOOL_RESULT_CHARS` | `14000` | Batas karakter satu hasil *tool* sebelum dipangkas. Hasil yang dipangkas tetap JSON valid: item list dibuang dari belakang, dan bila tetap kepanjangan teksnya dipotong lalu dibungkus. Naikkan bila model punya *context window* besar, turunkan bila permintaan terasa lambat. |
+| `MODEL_ALLOWLIST` | (kosong) | Model lain yang boleh dipilih lewat dropdown di UI, dipisahkan koma. Kosong berarti tanpa dropdown; lihat [Memilih model di UI](#memilih-model-di-ui-opsional). |
 | `DATA_DIR`, `RAW_DIR`, `PARSED_DIR`, `DB_PATH` | `./data`, `./data/raw`, `./data/parsed`, `./data/wellchat.db` | Lokasi data. |
 
 API key tidak pernah masuk ke repositori karena `.env` sudah ada di `.gitignore`.
@@ -83,7 +84,7 @@ OPENAI_MODEL=<nama model di penyedia tersebut>
 Yang dibutuhkan dari model/penyedia:
 
 - Mendukung **tool calling** (function calling).
-- Mendukung **structured output** ber-JSON schema (dipakai untuk menegakkan status jawaban dan sitasi).
+- Mendukung **structured output** ber-JSON schema (dipakai untuk menegakkan status jawaban dan sitasi). Schema hanya dikirim di panggilan jawaban akhir, jadi proxy yang menerapkan JSON schema dengan memaksa model langsung menjawab tetap bisa dipakai (lihat [Resolution poin 11](#kendala-dan-cara-saya-menyelesaikannya)).
 - Kompatibel dengan pustaka `openai` Python (endpoint bergaya `/v1/chat/completions`).
 
 Apa yang perlu disesuaikan bila penyedia berbeda:
@@ -94,8 +95,22 @@ Apa yang perlu disesuaikan bila penyedia berbeda:
 | Model *reasoning* (`gpt-5*`, `o*`) | Set `OPENAI_REASONING_EFFORT` sesuai yang didukung; beberapa model menolak *tool calling* bila effort tidak sesuai. |
 | Endpoint atau payload error | Pesan aslinya ditampilkan di UI/CLI, bukan ditelan. |
 | Respons terasa lambat | Turunkan `ANSWER_DEADLINE_S` atau `MAX_TOOL_RESULT_CHARS`. |
+| Model membalas JSON dalam blok ```` ```json ```` atau teks biasa | Tetap terbaca: pembungkusnya dibuang, dan untuk teks biasa sumber diambil dari laporan yang disebut di jawaban. |
 
-Catatan: pengembangan dan evaluasi terakhir dijalankan memakai endpoint kompatibel non-OpenAI (`OPENAI_BASE_URL` diisi), dengan hasil 23/23 pada set pertanyaan uji internal. Konfigurasi OpenAI langsung juga tetap didukung — cukup kosongkan `OPENAI_BASE_URL`.
+Catatan: evaluasi terakhir saya jalankan langsung di api.openai.com dengan `gpt-5.4-mini` (konfigurasi default) dan lulus 23/23. Selama pengembangan, aplikasi juga saya coba di endpoint OpenAI-compatible lain lewat `OPENAI_BASE_URL`; masalah yang hanya muncul di sebagian proxy sudah ditangani di kode (lihat [Resolution poin 10 dan 11](#kendala-dan-cara-saya-menyelesaikannya)).
+
+### Memilih model di UI (opsional)
+
+Secara default aplikasi hanya memakai `OPENAI_MODEL`, dan sidebar cukup menampilkan nama model tersebut. Kalau ingin membandingkan beberapa model atau berpindah ke endpoint lain yang kompatibel dengan OpenAI, isi `MODEL_ALLOWLIST` di `.env` (dipisahkan koma):
+
+```bash
+MODEL_ALLOWLIST=<model-1>,<model-2>
+```
+
+Setelah itu sidebar menampilkan dropdown **Model**. Isinya `OPENAI_MODEL` ditambah model di `MODEL_ALLOWLIST`, tetapi hanya yang benar-benar tersedia di endpoint (dicek lewat `GET /v1/models`, di-cache 10 menit). Daftar ini sengaja dibatasi karena endpoint bisa mengembalikan ratusan model, termasuk model embedding, gambar, atau audio yang tidak mendukung *tool calling* dan *structured output*.
+
+- Pilihan model berlaku per sesi browser, jadi tidak mengubah model pengguna lain.
+- Bila daftar gagal diambil atau tidak ada model allowlist yang tersedia di endpoint, UI kembali memakai `OPENAI_MODEL` dan menampilkan keterangannya.
 
 ## 4. Meletakkan dataset
 
@@ -278,7 +293,7 @@ Database (`data/wellchat.db`) hanyalah indeks turunan. Setiap kali `ingest` dija
 | Tabel | Isi |
 |---|---|
 | `documents` | Satu baris per file: tipe, nomor dan tanggal laporan, warnings. |
-| `fields` | Field header per laporan (`Cumm NPT`, `COUNTRY`, ...). |
+| `fields` | Field header per laporan (`Cumm NPT`, `COUNTRY`, ...), ditambah nilai baris mud DGOS (`Mud Weight`, `Mud Type`, `Progress`, `Avg ROP`). |
 | `sections` | Teks per bagian laporan. |
 | `operations` | Baris *Operation Summary* DDR, termasuk flag NPT. |
 | `report_tables` | Tabel DGOS (casing, formation tops) dalam bentuk JSON. |
@@ -301,7 +316,8 @@ Isi test suite:
 
 - `tests/test_parsers.py`: memeriksa hasil parsing dataset asli (di-skip kalau `data/raw` kosong), ditambah kasus baris operasi DDR dengan MD bulat atau kosong dan laporan tanpa heading `BIT DATA`.
 - `tests/test_synthetic.py`: membuat PDF baru dengan layout serupa tetapi nilai berbeda (nama sumur, tanggal, NPT), lalu memastikan semuanya terparsing dan bisa dicari. Test ini yang saya pakai sebagai bukti bahwa parser tidak terikat pada file contoh.
-- `tests/test_agent.py`: memeriksa loop agen dan guardrail dengan LLM palsu: penolakan baku, jawaban tanpa tool dianggap di luar cakupan, sumber halusinasi dibuang, pertanyaan tentang *offset well*, serta batas waktu jawaban.
+- `tests/test_agent.py`: memeriksa loop agen dan guardrail dengan LLM palsu: penolakan baku, jawaban tanpa tool dianggap di luar cakupan, "tidak ditemukan" tanpa mencari memicu riset ulang, sumber halusinasi dibuang, JSON dalam blok kode atau jawaban kosong, pertanyaan tentang *offset well*, schema yang hanya dikirim di panggilan akhir, serta batas waktu jawaban.
+- `tests/test_models.py`: memeriksa dropdown model di UI Streamlit (lewat `streamlit.testing`): tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, dan pilihan model tidak bocor ke sesi lain.
 - `tests/test_tools.py`: memeriksa tool yang dipanggil LLM, misalnya rencana operasi dari semua laporan, daftar sumur, dan hasil tool yang terlalu panjang tetap berupa JSON valid.
 - `eval/questions.json`: 23 pertanyaan uji (3 contoh dari soal, pertanyaan faktual lain, glosarium, dan di luar cakupan). `run_eval` mengukur akurasi dan waktu respons, lalu menulis hasilnya ke `eval/results.md`.
 
@@ -309,8 +325,8 @@ Isi test suite:
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`pytest`) | **28/28 lulus** dalam ±4 detik |
-| Evaluasi end-to-end (`eval.run_eval`) | **23/23 lulus**, respons paling lambat **11,1 detik**, rata-rata 5,6 detik (batas 180 detik) |
+| Unit test (`pytest`) | **44/44 lulus** dalam ±6 detik |
+| Evaluasi end-to-end (`eval.run_eval`) dengan `gpt-5.4-mini` di api.openai.com | **23/23 lulus** di tiga run terakhir berturut-turut, respons paling lambat **8,9 detik**, rata-rata 4,0 detik (batas 180 detik) |
 
 Lingkungan pengujian, rincian per pertanyaan, dan catatan dari beberapa kali run ada di **[HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md)**.
 
@@ -325,7 +341,7 @@ Inti masalahnya adalah tanya jawab faktual atas sedikit dokumen semi-terstruktur
 1. **Parser berbasis label dan heading, bukan posisi.** DDR dan DGOS adalah formulir dengan label tetap (`Cumm NPT :`, `COUNTRY :`, `NEXT 24 HRS OPERATION`). Parser mencari label tersebut, jadi PDF baru dengan format serupa tetapi isi dan panjang berbeda tetap terbaca. Teks bersih per halaman selalu ikut disimpan sebagai cadangan.
 2. **JSON sebagai sumber kebenaran, SQLite sebagai indeks.** JSON memenuhi syarat penyimpanan dan mudah diperiksa manusia. SQLite (nilai tambah) memberi query terstruktur dan pencarian full-text tanpa setup tambahan.
 3. **Agen dengan tool, bukan RAG vektor yang mengambil konteks sekali saja.** LLM memanggil tool read-only (`list_reports`, `get_report_fields`, `get_planned_operations`, `search_reports`, `read_report_section`, `lookup_glossary`) sebanyak yang dibutuhkan, lalu menjawab dengan sitasi. Untuk pertanyaan seperti "berapa total NPT", model bisa mengambil field yang sama dari semua laporan sekaligus lalu membandingkannya.
-4. **Guardrail di kode, bukan hanya di prompt.** Output model dibatasi JSON schema (`status`, `answer`, `sources`). Pesan penolakan berupa teks tetap dari aplikasi, sehingga selalu konsisten. Jawaban yang tidak didahului pemanggilan tool otomatis dianggap di luar cakupan, sumber yang tidak ada di database dibuang, dan pertanyaan yang hanya menyebut *offset well* (sumur tanpa laporan, misalnya TAPIS-F) langsung dijawab "tidak ditemukan" tanpa memanggil LLM.
+4. **Guardrail di kode, bukan hanya di prompt.** Jawaban akhir dibatasi JSON schema (`status`, `answer`, `sources`). Pesan penolakan berupa teks tetap dari aplikasi, sehingga selalu konsisten. Jawaban yang tidak didahului pemanggilan tool otomatis dianggap di luar cakupan, "tidak ditemukan" baru diterima setelah model benar-benar mencari, sumber yang tidak ada di database dibuang, dan pertanyaan yang hanya menyebut *offset well* (sumur tanpa laporan, misalnya TAPIS-F) langsung dijawab "tidak ditemukan" tanpa memanggil LLM. Semua prompt dan pesan baku dikumpulkan di `prompts.py`, terpisah dari logika agen.
 5. **Batas waktu ditegakkan di kode.** Satu jawaban dibatasi 150 detik, jauh di bawah syarat 3 menit. Kalau waktunya hampir habis, agen berhenti memanggil tool dan langsung menyusun jawaban dari data yang sudah didapat.
 
 ### Arsitektur
@@ -341,7 +357,9 @@ wellchat/
 ├── ingest.py           CLI: raw -> JSON (inkremental, SHA-256) -> SQLite
 ├── store.py            skema SQLite + FTS5, rebuild atomik
 ├── tools.py            tool read-only untuk LLM, setiap hasil membawa file + halaman
-├── agent.py            loop tool-calling OpenAI, structured output, guardrail, batas waktu
+├── models.py           pilihan model untuk dropdown UI (allowlist ∩ GET /v1/models)
+├── prompts.py          system prompt, JSON schema jawaban, pesan penolakan & "tidak ditemukan"
+├── agent.py            loop dua fase (riset dengan tool, lalu jawaban JSON), guardrail, batas waktu
 └── cli.py              chat di terminal
 app.py                  UI Streamlit
 eval/                   pertanyaan uji + skrip evaluasi
@@ -372,11 +390,14 @@ tests/                  unit test (parser, PDF sintetis, agen dengan LLM palsu)
 7. **Istilah glosarium yang belum pasti** (`BMP`, `COB`, `CSS`, entri bertanda *to be confirmed*). *Solusi:* flag `to_be_confirmed` di JSON, dan model diinstruksikan menyampaikannya sebagai informasi yang belum pasti.
 8. **Menjaga jawaban tetap di dalam dokumen.** *Solusi:* penolakan ditegakkan di kode (lihat Planning poin 4) dan diuji dengan LLM palsu di `tests/test_agent.py`.
 9. **Hasil tool yang terlalu panjang.** Pencarian dengan `limit` besar bisa melewati batas 14.000 karakter. Versi awal memotong string JSON mentah sehingga hasilnya rusak. *Solusi:* hasil yang kepanjangan dipangkas per item (item terakhir dibuang dulu), jadi model tetap menerima JSON yang valid dan sitasi item yang tersisa tetap utuh.
-10. **Waktu respons harus terjamin, bukan kebetulan cepat.** Sebelumnya jumlah putaran tool dibatasi, tetapi waktunya tidak, sehingga kalau API lambat, satu jawaban secara teori bisa makan belasan menit. *Solusi:* batas waktu 150 detik per jawaban, 30 detik di antaranya disisihkan untuk jawaban akhir, dan timeout per request ikut menghitung retry SDK.
+10. **Waktu respons harus terjamin, bukan kebetulan cepat.** Sebelumnya jumlah putaran tool dibatasi, tetapi waktunya tidak, sehingga kalau API lambat, satu jawaban secara teori bisa makan belasan menit. *Solusi:* batas waktu 150 detik per jawaban, 30 detik di antaranya disisihkan untuk jawaban akhir, dan timeout per request ikut menghitung retry SDK. Belakangan saya menemukan bahwa timeout SDK dihitung per jeda baca data, sehingga provider yang terus mengirim keep-alive bisa menahan satu request sampai 10 menit. Karena itu setiap panggilan model sekarang juga dibatasi waktu dinding (wall-clock) di thread terpisah: kalau fase riset kehabisan waktu, agen langsung menyusun jawaban dari data yang sudah ada, dan kalau fase jawaban yang kehabisan waktu, pengguna mendapat pesan error yang jelas.
+11. **Sebagian proxy tidak pernah memanggil tool.** Saat saya mencoba dua model lain lewat proxy OpenAI-compatible, keduanya sering langsung menjawab "tidak ditemukan" tanpa satu pun tool call. Setelah saya uji request yang sama dengan dan tanpa `response_format`, ternyata proxy yang saya pakai menerapkan JSON schema dengan memaksa model langsung mengeluarkan jawaban akhir, sehingga tool tidak pernah sempat dipanggil. *Solusi:* jawaban dibagi dua fase. Fase riset memanggil tool tanpa `response_format`, dan model cukup membalas `READY` bila datanya sudah lengkap (supaya jawaban tidak ditulis dua kali). Setelah itu ada satu panggilan jawaban dengan `response_format` dan `tool_choice="none"`. Model yang tetap menjawab "tidak ditemukan" tanpa mencari diwajibkan memanggil tool sekali lagi, JSON dalam blok kode tetap dibaca, dan jawaban kosong diperlakukan sebagai "tidak ditemukan".
+12. **Data yang ada di PDF tapi tidak terjangkau model.** Evaluasi dengan `gpt-5.4-mini` menemukan dua kasus. Pertama, nilai `OPERATOR` di DGOS tersimpan kosong: pembersih judul halaman (`PTT PUBLIC COMPANY LIMITED` yang menempel di ujung baris) ikut menghapus nilai yang isinya persis judul itu, sehingga model menjawab dari `OPERATORSHIP` (COB). Kedua, mud weight DGOS hanya ada di teks, bukan sebagai field. *Solusi:* judul hanya dibuang bila menempel di belakang teks lain, nilai baris mud DGOS (mud weight, mud type, progress, ROP) didaftarkan sebagai field, dan prompt meminta model memakai `get_report_fields` lebih dulu untuk nilai header (teks bebas sering memuat angka lain dengan nama mirip, misalnya kedalaman wireline `2426.7m-WLD` yang bukan MD laporan).
+13. **`OPENAI_BASE_URL=` tanpa nilai membuat semua request gagal.** SDK OpenAI membaca variabel itu sendiri dari environment dan memakai string kosong sebagai URL ("Connection error"). *Solusi:* base URL selalu dikirim eksplisit ke SDK, dengan default `https://api.openai.com/v1`.
 
 ### Hasil evaluasi
 
-Di mesin saya, evaluasi terakhir lulus **23/23** dengan respons paling lambat **11,1 detik** (batas 180 detik). Rinciannya ada di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md). Untuk mengulanginya, jalankan `python -m eval.run_eval`; hasil terbaru akan ditulis ke `eval/results.md`.
+Di mesin saya, dengan `gpt-5.4-mini` langsung di api.openai.com, tiga run evaluasi terakhir berturut-turut lulus **23/23**, dengan respons paling lambat **8,9 detik** (batas 180 detik). Rinciannya ada di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md). Untuk mengulanginya, jalankan `python -m eval.run_eval`; hasil terbaru akan ditulis ke `eval/results.md`.
 
 ### Rencana perbaikan ke depan
 

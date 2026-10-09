@@ -1,16 +1,16 @@
 # Hasil Pengujian Lokal
 
-Dokumen ini merangkum pengujian yang saya jalankan di mesin sendiri pada **9 Oktober 2026**, terhadap kode versi terakhir di repositori ini. Cara mengulanginya ada di [bagian terakhir](#cara-mengulangi).
+Dokumen ini merangkum pengujian yang saya jalankan di mesin sendiri pada **9 Oktober 2026**, terhadap kode versi terakhir di repositori ini. Evaluasi end-to-end memakai konfigurasi default yang sama dengan yang akan dipakai reviewer: **`gpt-5.4-mini` langsung di api.openai.com**. Cara mengulanginya ada di [bagian terakhir](#cara-mengulangi).
 
 ## Ringkasan
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`python -m pytest -q`) | **28/28 lulus** dalam ±4 detik |
-| Evaluasi end-to-end (`python -m eval.run_eval`) | **23/23 lulus** |
-| Waktu respons paling lambat | **11,1 detik** (syarat soal: maksimal 180 detik) |
-| Rata-rata / median waktu respons | 5,6 detik / 4,5 detik |
-| Re-parse dataset setelah perubahan parser | Output JSON identik dengan sebelumnya (hanya `parsed_at` yang berbeda) |
+| Unit test (`python -m pytest -q`) | **44/44 lulus** dalam ±6 detik |
+| Evaluasi end-to-end (`python -m eval.run_eval`) | **23/23 lulus** di tiga run terakhir berturut-turut |
+| Waktu respons paling lambat | **6,4 detik** di run terakhir, 8,9 detik di ketiga run (syarat soal: maksimal 180 detik) |
+| Rata-rata / median waktu respons | 4,0 detik / 4,3 detik |
+| Re-parse dataset setelah perbaikan parser | Hanya field `OPERATOR` di kedua DGOS yang berubah (dari kosong menjadi `PTT PUBLIC COMPANY LIMITED`); semua nilai lain identik |
 
 ## Lingkungan
 
@@ -22,26 +22,27 @@ Dokumen ini merangkum pengujian yang saya jalankan di mesin sendiri pada **9 Okt
 | openai (SDK) | 3.26.1 |
 | streamlit | 1.65.0 |
 | pytest / reportlab | 9.1.1 / 5.0.1 |
-| LLM | `deepseek-v4.1-flash` lewat endpoint yang kompatibel dengan OpenAI (`OPENAI_BASE_URL`) |
+| LLM | `gpt-5.4-mini` di api.openai.com, `OPENAI_REASONING_EFFORT=none`, `OPENAI_BASE_URL` kosong |
 
-Untuk pengujian lokal, saya tidak memakai api.openai.com langsung, melainkan penyedia lain yang kompatibel dengan OpenAI API. Konfigurasinya cukup tiga variabel di `.env`: `OPENAI_API_KEY` (diisi key dari penyedia tersebut), `OPENAI_BASE_URL`, dan `OPENAI_MODEL`. Dengan key OpenAI biasa, cukup isi `OPENAI_API_KEY` saja, karena model default-nya `gpt-5.4-mini`.
+`OPENAI_REASONING_EFFORT` harus `none` untuk `gpt-5.4-mini`. Saya sudah mengeceknya: dengan `low` atau `medium`, API menolak request yang membawa tool (`Function tools with reasoning_effort are not supported for gpt-5.4-mini`).
 
-Dataset yang dipakai: 2 DDR (#32 dan #53), 2 DGOS (#72 dan #84), dan `Glossaries.docx` (196 istilah).
+Dataset yang dipakai: 2 DDR (#32 dan #53), 2 DGOS (#72 dan #84), dan `Glossaries.docx` (196 istilah). Evaluasi saya jalankan di folder data terpisah yang hanya berisi dataset asli, supaya PDF lain yang sempat saya unggah untuk mencoba fitur upload tidak ikut memengaruhi hasil.
 
 ## Unit test
 
-Semua unit test berjalan tanpa API key. Bagian agen memakai LLM palsu yang jawabannya sudah diskenariokan.
+Semua unit test berjalan tanpa API key. Bagian agen memakai LLM palsu yang jawabannya sudah diskenariokan, dan bagian UI memakai `streamlit.testing`.
 
 | File | Jumlah | Yang diuji |
 |---|---|---|
-| `tests/test_agent.py` | 12 | Jawaban dengan sitasi, penolakan baku, jawaban tanpa tool ditolak, sumber halusinasi dibuang, pesan "tidak ditemukan", `reasoning_effort` hanya untuk model reasoning, pertanyaan *offset well* tanpa memanggil LLM, batas waktu jawaban |
-| `tests/test_parsers.py` | 8 | Header dan lokasi DGOS, pembersihan label putih tersembunyi, rencana wireline, tabel DGOS, header dan NPT DDR, baris operasi DDR, glosarium, baris MD bulat/kosong dan laporan tanpa heading `BIT DATA` |
-| `tests/test_synthetic.py` | 4 | PDF buatan dengan layout serupa tetapi nilai berbeda: semua file terparsing, field dan NPT DDR baru, DGOS baru bisa dicari, PDF dengan layout tak dikenal tetap bisa dicari |
-| `tests/test_tools.py` | 4 | Rencana operasi dari semua laporan, daftar sumur, hasil tool yang terlalu panjang tetap JSON valid (baik teks panjang maupun list panjang) |
+| `tests/test_agent.py` | 22 | Jawaban dengan sitasi, penolakan baku, jawaban tanpa tool ditolak, "tidak ditemukan" tanpa mencari memicu riset ulang, sumber halusinasi dibuang, JSON schema hanya dikirim di panggilan akhir, JSON dalam blok kode, JSON dengan baris baru di dalam string, jawaban kosong atau `READY`, endpoint yang tidak mendukung `tool_choice="required"`, jawaban teks biasa hanya mengutip laporan yang disebut, `reasoning_effort` hanya untuk model reasoning, *offset well*, batas waktu jawaban, request yang macet dihentikan sesuai batas waktu dinding, `OPENAI_BASE_URL` kosong tetap ke api.openai.com |
+| `tests/test_models.py` | 5 | Dropdown model: urutan pilihan, tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, pilihan model tidak bocor ke sesi lain |
+| `tests/test_parsers.py` | 8 | Header dan lokasi DGOS (termasuk `OPERATOR`), pembersihan label putih tersembunyi, rencana wireline, tabel DGOS, header dan NPT DDR, baris operasi DDR, glosarium, baris MD bulat/kosong dan laporan tanpa heading `BIT DATA` |
+| `tests/test_synthetic.py` | 4 | PDF buatan dengan layout serupa tetapi nilai berbeda: semua file terparsing, field dan NPT DDR baru, DGOS baru (termasuk `OPERATOR` dan `AFE No.`) bisa dicari, PDF dengan layout tak dikenal tetap bisa dicari |
+| `tests/test_tools.py` | 5 | Rencana operasi dari semua laporan, daftar sumur, hasil tool yang terlalu panjang tetap JSON valid (teks panjang maupun list panjang), mud weight DGOS bisa diambil sebagai field |
 
-Test di `test_parsers.py` dan `test_tools.py` yang memakai dataset asli otomatis di-skip kalau `data/raw` kosong. Test sintetis dan test agen tetap berjalan tanpa dataset.
+Test di `test_parsers.py`, `test_tools.py`, dan hampir semua test di `test_agent.py` memakai dataset asli, dan otomatis di-skip kalau `data/raw` kosong.
 
-Untuk empat test yang saya tambahkan terakhir (batas waktu, JSON valid, MD bulat/kosong, laporan tanpa `BIT DATA`), saya juga memastikan test tersebut **gagal** di kode sebelum perbaikan dan **lulus** setelahnya. Dengan begitu, test-nya benar-benar menangkap masalah yang dimaksud.
+Untuk test yang menutup bug, saya memastikan test tersebut **gagal** di kode sebelum perbaikan dan **lulus** setelahnya, supaya test-nya benar-benar menangkap masalah yang dimaksud.
 
 ## Evaluasi end-to-end
 
@@ -56,44 +57,58 @@ Evaluasi ini memakai LLM sungguhan dan dataset asli. Sebuah pertanyaan dianggap 
 | *Offset well* tanpa laporan (harus "tidak ditemukan") | 1 | 1 |
 | **Total** | **23** | **23** |
 
-### Rincian per pertanyaan
+### Rincian per pertanyaan (run terakhir)
 
 | # | Pertanyaan | Status | Waktu (detik) |
 |---|---|---|---|
-| 1 | Dimana letak lokasi sumur? | answered | 9,4 |
-| 2 | Berapa Total NPT sumur? | answered | 9,8 |
-| 3 | Wireline run apa yang direncanakan? | answered | 9,4 |
-| 4 | Apa arti NPT? | answered | 3,6 |
-| 5 | What does BHA stand for? | answered | 2,9 |
-| 6 | Apa nama rig yang digunakan? | answered | 3,4 |
-| 7 | Siapa operator sumur ini? | answered | 8,6 |
-| 8 | Berapa water depth sumur? | answered | 3,9 |
-| 9 | Berapa kedalaman MD pada DDR nomor 53? | answered | 6,8 |
-| 10 | Berapa daily cost pada laporan tanggal 19 Juli 2026? | answered | 6,1 |
-| 11 | Apa penyebab NPT pada DGOS report 84? | answered | 7,8 |
-| 12 | What was the mud weight in DGOS report 72? | answered | 3,8 |
-| 13 | Kapan spud date sumur? | answered | 4,5 |
-| 14 | What is the actual MD of formation top K-28? | answered | 4,9 |
-| 15 | Apa arti BMP? | answered | 10,3 |
-| 16 | Berapa jumlah personel di rig pada DDR 53? | answered | 7,1 |
-| 17 | What is the objective of the well? | answered | 11,1 |
-| 18 | Siapa presiden Indonesia saat ini? | out_of_scope | 2,3 |
-| 19 | Buatkan kode Python untuk mengurutkan list. | out_of_scope | 4,0 |
-| 20 | Berapa harga minyak Brent hari ini? | out_of_scope | 2,3 |
-| 21 | What's the weather in Jakarta tomorrow? | out_of_scope | 2,0 |
-| 22 | Halo, apa kabar? | out_of_scope | 4,2 |
+| 1 | Dimana letak lokasi sumur? | answered | 6,4 |
+| 2 | Berapa Total NPT sumur? | answered | 4,3 |
+| 3 | Wireline run apa yang direncanakan? | answered | 4,4 |
+| 4 | Apa arti NPT? | answered | 2,9 |
+| 5 | What does BHA stand for? | answered | 2,8 |
+| 6 | Apa nama rig yang digunakan? | answered | 4,3 |
+| 7 | Siapa operator sumur ini? | answered | 4,5 |
+| 8 | Berapa water depth sumur? | answered | 4,6 |
+| 9 | Berapa kedalaman MD pada DDR nomor 53? | answered | 3,8 |
+| 10 | Berapa daily cost pada laporan tanggal 19 Juli 2026? | answered | 4,7 |
+| 11 | Apa penyebab NPT pada DGOS report 84? | answered | 6,2 |
+| 12 | What was the mud weight in DGOS report 72? | answered | 5,0 |
+| 13 | Kapan spud date sumur? | answered | 4,9 |
+| 14 | What is the actual MD of formation top K-28? | answered | 4,8 |
+| 15 | Apa arti BMP? | answered | 3,2 |
+| 16 | Berapa jumlah personel di rig pada DDR 53? | answered | 4,6 |
+| 17 | What is the objective of the well? | answered | 5,1 |
+| 18 | Siapa presiden Indonesia saat ini? | out_of_scope | 3,6 |
+| 19 | Buatkan kode Python untuk mengurutkan list. | out_of_scope | 2,2 |
+| 20 | Berapa harga minyak Brent hari ini? | out_of_scope | 3,6 |
+| 21 | What's the weather in Jakarta tomorrow? | out_of_scope | 3,8 |
+| 22 | Halo, apa kabar? | out_of_scope | 2,9 |
 | 23 | Berapa NPT sumur TAPIS-F? | not_found | 0,0 |
 
 Pertanyaan #23 selesai dalam 0,0 detik karena guardrail *offset well* langsung menjawab "tidak ditemukan" tanpa memanggil LLM.
 
 ## Catatan dari beberapa kali run
 
-Saya menjalankan evaluasi penuh beberapa kali selama pengembangan. Ada dua kejadian yang menurut saya perlu dicatat:
+Saya menjalankan evaluasi penuh tujuh kali dengan `gpt-5.4-mini`. Empat run pertama masing-masing gagal di dua pertanyaan, dan setiap kegagalan saya telusuri sampai ke tool call-nya:
 
-1. **Provider sempat lambat.** Di satu run, pertanyaan #1 butuh 124 detik dan jawabannya kurang lengkap. Setelah saya telusuri per panggilan API, setiap panggilan normalnya selesai sekitar 2 detik, jadi lambatnya berasal dari sisi provider. Batas waktu jawaban bekerja sesuai rencana: agen berhenti memanggil tool dan tetap menjawab di bawah 3 menit. Dengan kode sebelumnya, kondisi yang sama secara teori bisa makan waktu jauh lebih lama.
-2. **Pertanyaan #14 sempat gagal.** Saat saya telusuri, model memanggil pencarian dengan `limit` 15, dan hasilnya melewati batas 14.000 karakter sehingga dipotong. Waktu itu pemotongannya membuat isi hasil sulit dibaca model. Setelah saya ubah menjadi pemangkasan per item (JSON tetap valid dan sitasi tetap utuh), #14 lulus di semua run berikutnya.
+| Run | Hasil | Pertanyaan yang gagal | Penyebab dan perbaikan |
+|---|---|---|---|
+| 1 | 21/23 | #7 operator, #16 personel | #7: bug parser. Nilai `OPERATOR` di DGOS tersimpan kosong karena pembersih judul halaman ikut menghapus nilai yang isinya persis "PTT PUBLIC COMPANY LIMITED". Model lalu menjawab dari field `OPERATORSHIP` (COB). #16: model berhenti setelah melihat daftar nama section tanpa membuka section personel. |
+| 2 | 21/23 | #9 MD, #12 mud weight | #7 dan #16 sudah lulus setelah parser diperbaiki dan prompt menambahkan aturan "buka section yang relevan sebelum menyimpulkan data tidak ada". #12: mud weight DGOS hanya ada di teks, belum menjadi field, jadi tidak bisa diambil lewat `get_report_fields`. |
+| 3–4 | 21/23, 23/23 | #9, #12 (run 3) | Setelah mud weight, mud type, progress, dan ROP DGOS didaftarkan sebagai field. Kegagalan yang tersisa: model memilih angka dari teks bebas (#9 mengutip kedalaman wireline `2426.7m-WLD`, bukan MD header `2,423.11 m`). |
+| 5–7 | 23/23, 23/23, 23/23 | – | Setelah prompt menambahkan aturan "untuk nilai header laporan, pakai `get_report_fields` lebih dulu". |
 
-Hasil di atas berasal dari run terakhir setelah kedua perbaikan tersebut. Karena jawaban LLM tidak sepenuhnya deterministik, angka waktu dan isi jawaban bisa sedikit berbeda di setiap run.
+Karena jawaban LLM tidak sepenuhnya deterministik, angka waktu dan isi jawaban bisa sedikit berbeda di setiap run. Tiga run terakhir berturut-turut lulus 23/23 dengan respons paling lambat 8,9 detik.
+
+## Mencoba model dan endpoint lain
+
+Aplikasi juga bisa diarahkan ke endpoint lain yang kompatibel dengan OpenAI (`OPENAI_BASE_URL`), dan model bisa dipilih lewat dropdown di UI bila `MODEL_ALLOWLIST` diisi. Yang sudah saya cek:
+
+- **Model OpenAI lain.** Dengan satu pertanyaan glosarium lewat agen lengkap, `gpt-6-luna`, `gpt-5.4-nano`, `gpt-5.6-luna`, dan `gpt-4.1-mini` menjawab benar dalam 3–8 detik. `gpt-4.1-nano` dan `gpt-4o-mini` juga benar, tetapi menjawab dalam bahasa Inggris untuk pertanyaan berbahasa Indonesia. `gpt-5-nano` menolak `reasoning_effort=none`, jadi perlu effort lain.
+- **Endpoint OpenAI-compatible lain.** Saya menemukan dua masalah yang hanya muncul di sebagian proxy, dan keduanya sudah diperbaiki di kode (lihat README bagian Resolution poin 10 dan 11):
+  - proxy yang menerapkan JSON schema dengan memaksa model langsung menjawab, sehingga tool tidak pernah dipanggil;
+  - proxy yang terus mengirim keep-alive sehingga satu request bisa bertahan sampai 10 menit.
+- Daftar model dari `GET /v1/models` dan dropdown di UI sudah saya cek ke endpoint sungguhan. Evaluasi penuh 23 pertanyaan di endpoint selain OpenAI belum saya ulang, karena kuota harian model gratis yang saya pakai sudah habis.
 
 ## Cara mengulangi
 
@@ -106,4 +121,4 @@ python -m pytest -q           # unit test, tanpa API key
 python -m eval.run_eval       # evaluasi end-to-end, butuh API key di .env
 ```
 
-Hasil lengkap evaluasi, termasuk potongan jawaban dan sumber untuk setiap pertanyaan, ditulis ke `eval/results.md`. File tersebut tidak saya commit karena isinya berubah di setiap run.
+Pastikan `data/raw` hanya berisi dataset asli sebelum menjalankan evaluasi, karena laporan tambahan bisa mengubah jawaban yang diharapkan (misalnya "Total NPT"). Hasil lengkap evaluasi, termasuk potongan jawaban dan sumber untuk setiap pertanyaan, ditulis ke `eval/results.md`. File tersebut tidak saya commit karena isinya berubah di setiap run.
