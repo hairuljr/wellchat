@@ -1,4 +1,4 @@
-"""Turn one source file into the JSON structure documented in README.md."""
+"""Ubah satu file sumber menjadi struktur JSON yang dijelaskan di README.md."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def _source(path: str, root: str) -> dict:
 
 
 def _generic(pages) -> dict:
-    """Fallback for PDFs that are neither DDR nor DGOS: keep page text searchable."""
+    """Fallback untuk PDF yang bukan DDR maupun DGOS: teks per halaman tetap bisa dicari."""
     lines = flatten(pages)
     heading = re.compile(r"^[A-Z][A-Z0-9 /&()@.-]{3,60}$")
     return {

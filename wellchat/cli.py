@@ -1,7 +1,7 @@
-"""Terminal chat, handy for quick checks and for the evaluation script.
+"""Chat lewat terminal, praktis untuk cek cepat dan dipakai skrip evaluasi.
 
     python -m wellchat.cli "Dimana letak lokasi sumur?"
-    python -m wellchat.cli            # interactive
+    python -m wellchat.cli            # mode interaktif
 """
 
 from __future__ import annotations

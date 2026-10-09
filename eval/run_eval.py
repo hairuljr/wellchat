@@ -1,10 +1,10 @@
-"""Run the question set against the live agent and report accuracy + latency.
+"""Jalankan set pertanyaan ke agen sungguhan, lalu laporkan akurasi dan waktu respons.
 
-    python -m eval.run_eval                 # all questions
-    python -m eval.run_eval --only 1 2 3    # selected question numbers
+    python -m eval.run_eval                 # semua pertanyaan
+    python -m eval.run_eval --only 1 2 3    # hanya nomor tertentu
 
-A question passes when the status matches and every `must` group has at least
-one of its alternatives in the answer. Writes eval/results.md.
+Pertanyaan dianggap lulus bila status-nya cocok dan setiap grup `must` punya
+minimal satu alternatif yang muncul di jawaban. Hasilnya ditulis ke eval/results.md.
 """
 
 from __future__ import annotations

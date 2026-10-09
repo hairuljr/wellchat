@@ -1,7 +1,7 @@
-"""Parse freshly generated PDFs that imitate the report layouts with different values.
+"""Parsing PDF yang dibuat saat test, meniru layout laporan tetapi dengan nilai berbeda.
 
-Shows the parser is driven by labels and headings, not by the sample files, and
-runs without the private dataset.
+Membuktikan parser bekerja berdasarkan label dan heading, bukan hafal file contoh,
+dan test ini tetap jalan tanpa dataset privat.
 """
 
 import json

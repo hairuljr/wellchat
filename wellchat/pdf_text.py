@@ -1,13 +1,13 @@
-"""Low-level PDF text extraction shared by all report parsers.
+"""Ekstraksi teks PDF tingkat rendah yang dipakai bersama oleh semua parser laporan.
 
-The operator's PDFs contain two kinds of noise that break naive extraction:
+PDF dari operator mengandung dua jenis noise yang merusak ekstraksi biasa:
 
-* hidden labels drawn in white on top of real values (e.g. a white
-  "Current Date" sitting on "10-09-2026" -> "Cu1r0r-e0n9t- 2D0a2t6e"), and
-* "fake bold" text drawn twice at almost the same position
+* label tersembunyi berwarna putih yang ditumpuk di atas nilai asli (misalnya
+  "Current Date" putih di atas "10-09-2026" -> "Cu1r0r-e0n9t- 2D0a2t6e"), dan
+* teks "fake bold" yang digambar dua kali di posisi hampir sama
   (-> "DDAAIILLYY UUPPDDAATTEESS").
 
-Both are removed here, before any parser looks at the text.
+Keduanya dibuang di sini, sebelum teksnya dibaca parser mana pun.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import pdfplumber
 def _is_visible_char(obj: dict) -> bool:
     if obj.get("object_type") != "char":
         return True
-    if obj.get("size", 10) < 2:  # microscopic artefacts
+    if obj.get("size", 10) < 2:  # artefak berukuran sangat kecil
         return False
     color = obj.get("non_stroking_color")
     if color is None:
@@ -31,18 +31,18 @@ def _is_visible_char(obj: dict) -> bool:
     color = tuple(c for c in color if isinstance(c, (int, float)))
     if not color:
         return True
-    if len(color) == 1:  # grayscale, 1.0 = white
+    if len(color) == 1:  # grayscale, 1.0 = putih
         return color[0] < 0.95
     if len(color) == 3:  # RGB
         return min(color) < 0.95
-    if len(color) == 4:  # CMYK, all zero = white
+    if len(color) == 4:  # CMYK, semua nol = putih
         return max(color) > 0.05
     return True
 
 
 @dataclass
 class PageText:
-    number: int  # 1-based
+    number: int  # dimulai dari 1
     text: str
     lines: list[str] = field(default_factory=list)
     tables: list[list[list[str]]] = field(default_factory=list)
@@ -59,7 +59,7 @@ def _clean_table(raw: list[list]) -> list[list[str]]:
     rows = [r for r in rows if any(r)]
     if not rows:
         return []
-    # drop columns that are empty in every row (pdfplumber emits many for merged cells)
+    # buang kolom yang kosong di semua baris (pdfplumber menghasilkan banyak kolom ini untuk sel gabungan)
     keep = [i for i in range(max(len(r) for r in rows)) if any(i < len(r) and r[i] for r in rows)]
     return [[r[i] if i < len(r) else "" for i in keep] for r in rows]
 
@@ -78,7 +78,7 @@ def extract_pages(path: str, with_tables: bool = True) -> list[PageText]:
                         t = _clean_table(raw)
                         if len(t) >= 2:
                             tables.append(t)
-                except Exception:  # table detection is best effort
+                except Exception:  # deteksi tabel bersifat best effort
                     pass
             pages.append(PageText(number=idx, text=text, lines=lines, tables=tables))
     return pages
@@ -94,11 +94,11 @@ def detect_doc_type(first_page_text: str) -> str:
 
 
 def split_labeled_line(line: str, labels: list[str]) -> dict[str, str]:
-    """Split a line holding several `Label : value` pairs.
+    """Pecah satu baris yang berisi beberapa pasangan `Label : value`.
 
-    `labels` is the list of labels that may occur; the value of a label is the
-    text between its colon and the next known label. Labels are matched
-    longest-first so "Cum Rot Hrs" wins over "Rot Hrs".
+    `labels` adalah daftar label yang mungkin muncul; nilai sebuah label adalah
+    teks di antara titik duanya dan label berikutnya yang dikenal. Label dicocokkan
+    dari yang terpanjang, sehingga "Cum Rot Hrs" menang atas "Rot Hrs".
     """
     ordered = sorted(labels, key=len, reverse=True)
     pattern = re.compile(

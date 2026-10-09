@@ -1,4 +1,4 @@
-"""Tests run against the real dataset in data/raw (not committed); they skip when it is absent."""
+"""Test memakai dataset asli di data/raw (tidak di-commit); otomatis di-skip bila dataset tidak ada."""
 
 from pathlib import Path
 

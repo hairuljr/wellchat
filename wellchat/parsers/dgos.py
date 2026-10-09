@@ -1,4 +1,4 @@
-"""Parser for the Daily Geological Operations Summary (DGOS)."""
+"""Parser untuk Daily Geological Operations Summary (DGOS)."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ HEADER_LABELS = [
     "RIG NAME", "RIG TYPE", "RIG CONTRACTOR", "DFE (AMSL)", "OFFSET WELLS",
 ]
 
-# Free-text blocks: heading line -> section name. Their body runs until the next heading.
+# Blok teks bebas: baris heading -> nama section. Isinya berlanjut sampai heading berikutnya.
 HEADINGS = [
     ("CURRENT OPERATION @ 0600 HRS", re.compile(r"^CURRENT OPERATION @")),
     ("LAST 24 HRS OPERATION", re.compile(r"^LAST 24 HRS OPERATION")),
@@ -31,11 +31,11 @@ HEADINGS = [
     ("MNEMONICS", re.compile(r"^MNEMONICS")),
 ]
 
-# "D12 71.50 35.43 2530.00 / 2498.93"  -> phase, days, cost MUSD, depth MDDF / TVDSS
+# "D12 71.50 35.43 2530.00 / 2498.93"  -> phase, hari, biaya MUSD, kedalaman MDDF / TVDSS
 PHASE_ROW = re.compile(r"^(?P<phase>[A-Z]{1,4}\d{0,3})\s+(?P<days>[\d.]+)\s+(?P<cost>[\d.]+)\s+(?P<md>[\d.]+)\s*/\s*(?P<tvdss>[\d.]+)$")
 # "LOCATION DATA AFE 70.08 51.00 3135.00 / 3105.00"
 AFE_ROW = re.compile(r"AFE\s+(?P<days>[\d.]+)\s+(?P<cost>[\d.]+)\s+(?P<md>[\d.]+)\s*/\s*(?P<tvdss>[\d.]+)")
-# "- - 14.1 SBM 29-08-2026 hrs 06:00" -> progress, avg ROP, mud weight, mud type, date, time
+# "- - 14.1 SBM 29-08-2026 hrs 06:00" -> progress, avg ROP, mud weight, jenis mud, tanggal, jam
 MUD_ROW = re.compile(r"^(?P<progress>\S+)\s+(?P<rop>\S+)\s+(?P<mw>[\d.]+)\s+(?P<mud>[A-Z]+)\s+(?P<date>\d{2}-\d{2}-\d{4})\s+hrs\s+(?P<time>\d{2}:\d{2})")
 NPT_LINE = re.compile(r"^NPT\s*:\s*(?P<text>.+)$", re.I)
 REMARK_ROW = re.compile(r"^(?P<no>\d{1,2})\s+(?P<text>[A-Za-z].+)$")
@@ -48,7 +48,7 @@ def _fields(lines: list[Line]) -> list[dict]:
         for label, value in split_labeled_line(text, HEADER_LABELS).items():
             if label not in fields or (value and not fields[label]["value"]):
                 fields[label] = {"key": snake(label), "label": label, "value": value, "page": ln.page}
-    # some labels lose their colon in the white-text cleanup; recover "Start Date 18-06-2026" style
+    # sebagian label kehilangan titik dua saat teks putih dibersihkan; pulihkan pola "Start Date 18-06-2026"
     for label in ("Start Date", "Spud Date", "Current Date"):
         if not fields.get(label, {}).get("value"):
             for ln in lines:
@@ -56,10 +56,10 @@ def _fields(lines: list[Line]) -> list[dict]:
                 if m:
                     fields[label] = {"key": snake(label), "label": label, "value": m.group(1), "page": ln.page}
                     break
-    # strip the trailing heading that shares the line with MAX DEVIATION / RIG NAME etc.
+    # buang heading di ujung baris yang menempel pada MAX DEVIATION / RIG NAME dll.
     for f in fields.values():
         f["value"] = re.sub(r"\s*(RIG INFORMATION|PTT PUBLIC COMPANY LIMITED)$", "", f["value"]).strip()
-    # OFFSET WELLS wraps; its continuation sits a line or two lower, interleaved with OBJECTIVES
+    # OFFSET WELLS berlanjut ke baris baru, satu-dua baris di bawah, berselang-seling dengan OBJECTIVES
     offset = fields.get("OFFSET WELLS")
     if offset and offset["value"].endswith(","):
         start = next(i for i, l in enumerate(lines) if l.text.startswith("OFFSET WELLS"))
@@ -88,11 +88,11 @@ def _progress(lines: list[Line]) -> dict:
 
 
 def _table_block(pages: list[PageText], start: re.Pattern, row: re.Pattern, width: int) -> dict | None:
-    """Rows of one logical table inside pdfplumber's (often page-wide) table grid.
+    """Baris dari satu tabel logis di dalam grid tabel pdfplumber (sering selebar halaman).
 
-    The DGOS page is detected as one big grid, so a logical table is the run of
-    rows after a heading cell (`start`) whose first cell matches `row`. Columns
-    that are empty in every data row are dropped; the result is padded to `width`.
+    Halaman DGOS terdeteksi sebagai satu grid besar, jadi tabel logis adalah
+    rangkaian baris setelah sel heading (`start`) yang sel pertamanya cocok dengan
+    `row`. Kolom yang kosong di semua baris data dibuang; hasilnya dilengkapi sampai `width`.
     """
     for p in pages:
         for t in p.tables:

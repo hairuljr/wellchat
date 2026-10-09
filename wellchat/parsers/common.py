@@ -13,7 +13,7 @@ class Line:
 
 
 def flatten(pages: list[PageText], drop: list[re.Pattern] | None = None) -> list[Line]:
-    """All non-empty lines of the document, minus repeated headers/footers."""
+    """Semua baris tidak kosong di dokumen, tanpa header/footer yang berulang."""
     drop = drop or []
     out: list[Line] = []
     for p in pages:
@@ -26,11 +26,11 @@ def flatten(pages: list[PageText], drop: list[re.Pattern] | None = None) -> list
 
 
 def sectionize(lines: list[Line], headings: list[tuple[str, re.Pattern]]) -> list[dict]:
-    """Cut the line stream into sections at lines matching a heading pattern.
+    """Potong rangkaian baris menjadi section di setiap baris yang cocok dengan pola heading.
 
-    Text before the first heading goes to a "HEADER" section. A heading that
-    re-appears (e.g. table header repeated on every page) continues the open
-    section instead of starting a duplicate.
+    Teks sebelum heading pertama masuk ke section "HEADER". Heading yang muncul
+    lagi (misalnya header tabel yang diulang di setiap halaman) melanjutkan
+    section yang sedang terbuka, bukan membuat section duplikat.
     """
     sections: list[dict] = []
     current = {"name": "HEADER", "page_start": lines[0].page if lines else 1, "lines": []}
@@ -58,9 +58,9 @@ def sectionize(lines: list[Line], headings: list[tuple[str, re.Pattern]]) -> lis
 
 
 def collect_labeled_block(lines: list[Line], labels: list[str], stop: re.Pattern) -> dict[str, str]:
-    """Multi-line `Label : value` blocks where values wrap onto following lines.
+    """Blok `Label : value` multi-baris, di mana nilainya bisa berlanjut ke baris berikutnya.
 
-    Used for the DDR STATUS block (Current status / 24 hr summary / ...).
+    Dipakai untuk blok STATUS di DDR (Current status / 24 hr summary / ...).
     """
     label_rx = re.compile(r"^(" + "|".join(re.escape(l) for l in labels) + r")\s*:\s*(.*)$", re.IGNORECASE)
     out: dict[str, list[str]] = {}

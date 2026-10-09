@@ -1,7 +1,7 @@
-"""Parse every PDF / DOCX under the raw data folder into JSON, then rebuild SQLite.
+"""Parsing semua PDF / DOCX di folder data mentah menjadi JSON, lalu bangun ulang SQLite.
 
-    python -m wellchat.ingest            # parse new or changed files only
-    python -m wellchat.ingest --force    # re-parse everything
+    python -m wellchat.ingest            # hanya file baru atau yang berubah
+    python -m wellchat.ingest --force    # parsing ulang semuanya
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def ingest(raw_dir: Path, parsed_dir: Path, db_path: Path, force: bool = False, 
                 doc = parse_pdf(str(src), str(raw_dir))
             else:
                 doc = parse_docx_glossary(str(src), str(raw_dir))
-        except Exception as exc:  # one bad file must not stop the batch
+        except Exception as exc:  # satu file bermasalah tidak boleh menghentikan semuanya
             stats["failed"] += 1
             log(f"  FAILED  {rel}: {exc}")
             continue

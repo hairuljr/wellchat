@@ -1,7 +1,7 @@
-"""Glossary (.docx) -> list of term entries.
+"""Glosarium (.docx) -> daftar entri istilah.
 
-Any 2-column table in the document is read as `term | meaning`. Header rows
-("Abbreviation | Meaning") and alphabet divider rows ("A | A") are skipped.
+Setiap tabel 2 kolom di dokumen dibaca sebagai `istilah | arti`. Baris header
+("Abbreviation | Meaning") dan baris pemisah abjad ("A | A") dilewati.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def parse_glossary(path: str) -> list[dict]:
             term, meaning = row[0], row[1]
             if not term or not meaning:
                 continue
-            if term == meaning and len(term) == 1:  # alphabet divider
+            if term == meaning and len(term) == 1:  # pemisah abjad
                 continue
             full_form, _, description = meaning.partition(" – ")
             if not description:
