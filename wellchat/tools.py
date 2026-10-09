@@ -1,13 +1,20 @@
-"""Read-only tools the LLM can call. Every result carries file + page for citation."""
+"""Tool read-only yang bisa dipanggil LLM. Setiap hasil membawa file + halaman untuk sitasi."""
 
 from __future__ import annotations
 
 import json
 import sqlite3
 
+from . import config
 from .store import fts_query
 
-MAX_RESULT_CHARS = 14000
+# Batas karakter untuk satu hasil tool. Nilai aslinya dari config (env MAX_TOOL_RESULT_CHARS);
+# dibaca lewat config saat dipakai supaya perubahan env atau monkeypatch tetap berlaku.
+MAX_RESULT_CHARS = config.MAX_TOOL_RESULT_CHARS
+
+
+def _limit() -> int:
+    return int(getattr(config, "MAX_TOOL_RESULT_CHARS", MAX_RESULT_CHARS) or MAX_RESULT_CHARS)
 
 
 def _docs(conn: sqlite3.Connection, include_glossary: bool = False) -> list[sqlite3.Row]:
@@ -45,7 +52,7 @@ def list_reports(conn: sqlite3.Connection) -> dict:
 
 
 def get_planned_operations(conn: sqlite3.Connection) -> dict:
-    """What each report says is planned next, oldest report first."""
+    """Rencana operasi berikutnya menurut setiap laporan, diurutkan dari laporan terlama."""
     plans = []
     for d in _docs(conn):
         brief = _doc_brief(d)
@@ -89,7 +96,7 @@ def search_reports(conn: sqlite3.Connection, query: str, report_type: str = "ANY
 
 
 def get_report_fields(conn: sqlite3.Connection, field: str | None = None, file: str | None = None) -> dict:
-    """Header fields (e.g. 'Cumm NPT', 'COUNTRY'), across all reports unless `file` is given."""
+    """Field header (misalnya 'Cumm NPT', 'COUNTRY') dari semua laporan, kecuali `file` diisi."""
     sql = ("SELECT d.file_name, d.doc_type, d.report_no, d.report_date, f.label, f.value, f.page "
            "FROM fields f JOIN documents d ON d.doc_id = f.doc_id WHERE f.value != ''")
     args: list = []
@@ -108,7 +115,7 @@ def get_report_fields(conn: sqlite3.Connection, field: str | None = None, file: 
     rows = conn.execute(sql, args).fetchall()
     out = [{"file": r["file_name"], "type": r["doc_type"], "report_no": r["report_no"], "report_date": r["report_date"],
             "field": r["label"], "value": r["value"], "page": r["page"]} for r in rows]
-    # free-text NPT line of DGOS reports is not a header field; surface it with NPT queries
+    # baris NPT di DGOS berupa teks bebas, bukan field header; tampilkan juga saat yang dicari NPT
     if field and "npt" in field.lower():
         for d in _docs(conn):
             if d["doc_type"] == "DGOS":
@@ -148,9 +155,6 @@ def read_report_section(conn: sqlite3.Connection, file: str, section: str | None
         if not match:
             return {"error": f"section {section!r} not found", "sections": names}
         result = {**_doc_brief(doc), "sections": [{"section": s["name"], "pages": json.loads(s["pages"]), "text": s["text"]} for s in match]}
-    text = json.dumps(result, ensure_ascii=False)
-    if len(text) > MAX_RESULT_CHARS:
-        result["truncated"] = True
     return result
 
 
@@ -227,9 +231,29 @@ def call_tool(conn: sqlite3.Connection, name: str, arguments: str | dict) -> str
         result = fn(conn, **args)
     except KeyError:
         result = {"error": f"unknown tool {name}"}
-    except Exception as exc:  # tool errors go back to the model, not to the user
+    except Exception as exc:  # error dari tool dikembalikan ke model, bukan ke pengguna
         result = {"error": f"{type(exc).__name__}: {exc}"}
+    return _fit(result)
+
+
+def _fit(result: dict) -> str:
+    """Serialisasi hasil tool tanpa melewati MAX_RESULT_CHARS, dan tetap JSON yang valid.
+
+    Item terakhir dari list terpanjang dibuang dulu, supaya struktur dan sitasi item
+    yang tersisa tetap utuh. Bila tidak ada list yang bisa dipangkas (misalnya satu
+    section yang sangat panjang), teksnya dipotong lalu dibungkus.
+    """
+    limit = _limit()
     text = json.dumps(result, ensure_ascii=False)
-    if len(text) > MAX_RESULT_CHARS:
-        text = text[:MAX_RESULT_CHARS] + ' ... [truncated, narrow your request]"'
+    if len(text) <= limit:
+        return text
+    result = {**result, "truncated": True, "note": "result too long; narrow the request for the rest"}
+    while len(text) > limit:
+        lists = [k for k, v in result.items() if isinstance(v, list) and len(v) > 1]
+        if not lists:
+            return json.dumps({"truncated": True, "note": result["note"], "partial": text[:limit]},
+                              ensure_ascii=False)
+        key = max(lists, key=lambda k: len(json.dumps(result[k], ensure_ascii=False)))
+        result[key] = result[key][:-1]
+        text = json.dumps(result, ensure_ascii=False)
     return text
