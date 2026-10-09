@@ -1,115 +1,31 @@
-"""Agen chat berbasis tool calling: model hanya boleh menjawab dari hasil tool."""
+"""Agen chat berbasis tool calling: model hanya boleh menjawab dari hasil tool.
+
+Satu pertanyaan dijawab dalam dua fase:
+
+1. Riset: model memanggil tool sebanyak yang dibutuhkan, tanpa `response_format`.
+   Sebagian proxy OpenAI-compatible menerapkan JSON schema dengan memaksa model
+   langsung menjawab, sehingga tool tidak pernah dipanggil bila keduanya dikirim bersamaan.
+2. Jawaban: satu panggilan dengan `response_format` dan `tool_choice="none"`
+   untuk menyusun jawaban JSON dari hasil riset.
+"""
 
 from __future__ import annotations
 
 import json
 import re
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 
 from . import config
+from .prompts import ANSWER_SCHEMA, FINAL_INSTRUCTION, NOT_FOUND, REFUSAL, SYSTEM_PROMPT
 from .tools import TOOL_SPECS, call_tool
 
-REFUSAL = {
-    "id": ("Maaf, saya hanya dapat menjawab pertanyaan seputar laporan sumur yang tersedia "
-           "(Daily Operation Report / DDR dan Daily Geological Operations Summary / DGOS) "
-           "serta istilah Oil & Gas di glosarium. Silakan ajukan pertanyaan tentang data sumur, "
-           "misalnya lokasi sumur, NPT, operasi wireline, kedalaman, casing, atau arti sebuah singkatan."),
-    "en": ("Sorry, I can only answer questions about the available well reports "
-           "(Daily Operation Report / DDR and Daily Geological Operations Summary / DGOS) "
-           "and Oil & Gas terms in the glossary. Please ask about the well data, for example "
-           "the well location, NPT, wireline operations, depths, casing, or what an abbreviation means."),
-}
-NOT_FOUND = {
-    "id": ("Informasi tersebut tidak ditemukan di laporan sumur maupun glosarium yang tersedia. "
-           "Coba tanyakan hal lain tentang data sumur atau istilah di glosarium."),
-    "en": ("That information is not in the available well reports or glossary. "
-           "Try asking about another aspect of the well data or a glossary term."),
-}
-
-SYSTEM_PROMPT = """You are a question-answering assistant for an oil & gas well-data repository.
-Your ONLY knowledge source is what your tools return: parsed daily well reports
-(DDR = Daily Drilling / Daily Operation Report, DGOS = Daily Geological Operations Summary)
-and the project glossary. Never use outside knowledge to state facts about the well.
-
-Scope
-- In scope: anything about the wells/reports in the repository (location, dates, depths, NPT,
-  costs, operations, wireline/logging, casing, mud, BHA, formation tops, personnel, safety...)
-  and meanings of oil & gas terms/abbreviations that are in the glossary.
-- Out of scope: everything else (general knowledge, other companies/wells not in the data,
-  coding, chit-chat, opinions, predictions). Return status "out_of_scope". Do not answer it.
-- In scope but the tools return nothing relevant after a reasonable search: status "not_found".
-  Never guess.
-- A question about a well that is not in list_reports `wells` (for example an offset well or
-  platform that is only mentioned by name in a report) has no data: status "not_found".
-  Do not answer it with data from another well. Use "not_found" even when you could explain why
-  the data is missing; the application shows a standard message.
-
-How to work
-1. Always call tools before answering an in-scope question. Start with list_reports when you
-   need to know which reports exist. Reports are written in English; search with English terms
-   and abbreviations even when the user writes Indonesian.
-2. Questions about "the well" refer to the well(s) in the reports (currently one well; check list_reports).
-3. Values differ between daily reports (they are snapshots on different dates). When a question
-   does not name a report or date and the reports give different values, the user may mean any
-   of them, so do not pick one or call one of them "the total". Open the answer with one short
-   line per report ("<type> #<no> (<date>): <value as written>"), oldest first, then note which
-   report is the most recent. Do not add values together.
-   - NPT: DDR header has "Daily NPT" and "Cumm NPT"; the DDR OPERATION SUMMARY flags NPT rows;
-     DGOS has an "NPT:" line in the last-24-hours block. Use get_report_fields(field="NPT").
-   - "Planned"/"next"/"forecast"/"rencana" questions: call get_planned_operations and report the
-     plan from every report, copying run numbers and tool names exactly (e.g. "WL Run #1: PEX-QAIT").
-4. Report data-quality warnings from list_reports when they affect the answer (e.g. a spud date
-   later than the report date). Present the value as written in the source and flag it.
-5. Glossary entries marked to_be_confirmed or "Unknown" must be presented as uncertain.
-6. Answer in the user's language (Indonesian or English). When there is one value, lead with it in
-   one line, then short supporting detail. When the value differs between reports, follow rule 3
-   instead: never open with a single number and never label one report's value as "total",
-   "resmi" or "official". Keep technical terms, numbers and units exactly as in the source.
-   Example for "Berapa NPT sumur?" (dummy values):
-     NPT per laporan:
-     - DDR #10 (2030-01-01): Daily NPT 2.00 hr, Cumm NPT 2.00 hr
-     - DDR #15 (2030-01-06): Daily NPT 0.00 hr, Cumm NPT 9.50 hr
-     - DGOS #20 (2030-01-11): 1.00 hrs due to pump repair
-     Laporan terbaru: DGOS #20 (2030-01-11).
-7. Cite every report/glossary file you used in `sources`, with page numbers from tool results.
-
-Final output: JSON matching the provided schema. For out_of_scope / not_found, `answer` may be
-empty; the application shows a standard message."""
-
-ANSWER_SCHEMA = {
-    "type": "json_schema",
-    "json_schema": {
-        "name": "well_answer",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "status": {"type": "string", "enum": ["answered", "out_of_scope", "not_found"]},
-                "language": {"type": "string", "enum": ["id", "en"]},
-                "answer": {"type": "string"},
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "file": {"type": "string"},
-                            "page": {"type": ["integer", "null"]},
-                            "section": {"type": "string"},
-                        },
-                        "required": ["file", "page", "section"],
-                        "additionalProperties": False,
-                    },
-                },
-            },
-            "required": ["status", "language", "answer", "sources"],
-            "additionalProperties": False,
-        },
-    },
-}
+MAX_RETRIES = 1
+CODE_FENCE = re.compile(r"^\s*```(?:json)?\s*|\s*```\s*$")
 
 
 @dataclass
@@ -127,31 +43,74 @@ def _is_reasoning_model(model: str) -> bool:
     return m.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))
 
 
-MAX_RETRIES = 1
-
-
 def _attempt_timeout(window: float) -> float:
     """SDK menerapkan timeout per percobaan, jadi jatah waktunya dibagi ke semua retry."""
     return min(config.REQUEST_TIMEOUT_S, window) / (MAX_RETRIES + 1)
+
+
+class AnswerTimeout(TimeoutError):
+    """Model tidak membalas dalam batas waktu dinding (wall-clock)."""
+
+
+def _call_with_deadline(fn, seconds: float, **kwargs):
+    """Jalankan `fn` di thread terpisah dan menyerah setelah `seconds` detik wall-clock.
+
+    Timeout SDK (httpx) dihitung per jeda baca, sehingga provider yang terus mengirim
+    keep-alive bisa menahan satu request jauh melewati batas. Thread yang ditinggalkan
+    selesai sendiri di latar belakang; thread baru per panggilan dipakai supaya request
+    yang macet tidak mengantre di depan request berikutnya.
+    """
+    box: dict = {}
+
+    def run():
+        try:
+            box["value"] = fn(**kwargs)
+        except BaseException as exc:  # diteruskan ke pemanggil di thread utama
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    if worker.is_alive():
+        raise AnswerTimeout(f"Model tidak membalas dalam {seconds:.0f} detik.")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
+def _parse_answer(content: str) -> dict:
+    """Jawaban akhir model sebagai dict, juga bila JSON-nya dibungkus ```json atau bukan JSON sama sekali."""
+    try:
+        # strict=False: sebagian model menulis baris baru apa adanya di dalam string JSON
+        data = json.loads(CODE_FENCE.sub("", content), strict=False)
+        if not isinstance(data, dict):
+            raise ValueError
+    except ValueError:  # JSONDecodeError turunan ValueError
+        data = {"status": "answered", "answer": content, "sources": []}
+    if data.get("status", "answered") == "answered" and str(data.get("answer") or "").strip().upper() in ("", "READY"):
+        data["status"] = "not_found"  # jawaban kosong (atau sinyal fase riset) tidak boleh tampil sebagai jawaban
+    return data
 
 
 class WellChatAgent:
     def __init__(self, conn: sqlite3.Connection, client: OpenAI | None = None, model: str | None = None):
         self.conn = conn
         self.model = model or config.OPENAI_MODEL
-        self.client = client or OpenAI(api_key=config.OPENAI_API_KEY or None, base_url=config.OPENAI_BASE_URL,
+        self.client = client or OpenAI(api_key=config.OPENAI_API_KEY or None, base_url=config.API_BASE_URL,
                                        timeout=config.REQUEST_TIMEOUT_S, max_retries=MAX_RETRIES)
 
-    def _create(self, messages: list[dict], final: bool, timeout: float):
-        kwargs = dict(model=self.model, messages=messages, tools=TOOL_SPECS, response_format=ANSWER_SCHEMA,
-                      timeout=timeout)
+    def _create(self, messages: list[dict], timeout: float, final: bool = False, tool_choice: str | None = None):
+        kwargs = dict(model=self.model, messages=messages, tools=TOOL_SPECS, timeout=timeout)
         if final:
-            kwargs["tool_choice"] = "none"
+            kwargs.update(tool_choice="none", response_format=ANSWER_SCHEMA)
+        elif tool_choice:
+            kwargs["tool_choice"] = tool_choice
         if config.OPENAI_REASONING_EFFORT and _is_reasoning_model(self.model):
             kwargs["reasoning_effort"] = config.OPENAI_REASONING_EFFORT
         elif not _is_reasoning_model(self.model):
             kwargs["temperature"] = 0
-        return self.client.chat.completions.create(**kwargs)
+        # batas wall-clock = jatah semua percobaan SDK (timeout per percobaan x jumlah percobaan)
+        return _call_with_deadline(self.client.chat.completions.create, timeout * (MAX_RETRIES + 1), **kwargs)
 
     def _offset_well_only(self, question: str) -> bool:
         """True bila pertanyaan menyebut offset well (tanpa laporan) dan tidak menyebut sumur yang punya laporan."""
@@ -177,16 +136,37 @@ class WellChatAgent:
 
         trace: list[dict] = []
         consulted: dict[str, set] = {}
-        response = None
-        for round_no in range(config.MAX_TOOL_ROUNDS + 1):
+        self._research(messages, deadline, trace, consulted)
+        data = self._answer(messages, deadline)
+        if data["status"] == "not_found" and not trace:
+            # model menyerah tanpa mencari: wajibkan satu ronde riset lagi sebelum menerima "tidak ditemukan"
+            try:
+                self._research(messages, deadline, trace, consulted, require_tool=True)
+            except BadRequestError:  # endpoint tidak mendukung tool_choice="required"; terima "tidak ditemukan"
+                pass
+            if trace:
+                data = self._answer(messages, deadline)
+
+        result = self._finalize(data, trace, consulted)
+        result.seconds = round(time.monotonic() - started, 1)
+        return result
+
+    def _research(self, messages: list[dict], deadline: float, trace: list[dict], consulted: dict[str, set],
+                  require_tool: bool = False) -> None:
+        """Ronde tool sampai model berhenti memanggil tool, jatah ronde habis, atau waktunya mepet."""
+        for round_no in range(config.MAX_TOOL_ROUNDS):
             remaining = deadline - time.monotonic()
-            final = round_no == config.MAX_TOOL_ROUNDS or remaining <= 2 * config.FINAL_ROUND_RESERVE_S
+            if remaining <= 2 * config.FINAL_ROUND_RESERVE_S:
+                return
             # ronde tool tidak boleh memakai waktu yang disisihkan untuk jawaban akhir
-            window = max(remaining, config.FINAL_ROUND_RESERVE_S) if final else remaining - config.FINAL_ROUND_RESERVE_S
-            response = self._create(messages, final=final, timeout=_attempt_timeout(window))
+            try:
+                response = self._create(messages, timeout=_attempt_timeout(remaining - config.FINAL_ROUND_RESERVE_S),
+                                        tool_choice="required" if require_tool and round_no == 0 else None)
+            except AnswerTimeout:
+                return  # riset dihentikan; jawaban disusun dari data yang sudah didapat
             msg = response.choices[0].message
-            if final or not msg.tool_calls:
-                break
+            if not msg.tool_calls:
+                return
             messages.append({
                 "role": "assistant",
                 "content": msg.content or "",
@@ -200,9 +180,12 @@ class WellChatAgent:
                 self._collect_sources(output, consulted)
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": output})
 
-        result = self._finalize(response.choices[0].message.content or "", trace, consulted)
-        result.seconds = round(time.monotonic() - started, 1)
-        return result
+    def _answer(self, messages: list[dict], deadline: float) -> dict:
+        remaining = deadline - time.monotonic()
+        final_messages = messages + [{"role": "user", "content": FINAL_INSTRUCTION}]
+        response = self._create(final_messages, timeout=_attempt_timeout(max(remaining, config.FINAL_ROUND_RESERVE_S)),
+                                final=True)
+        return _parse_answer(response.choices[0].message.content or "")
 
     @staticmethod
     def _collect_sources(output: str, consulted: dict[str, set]) -> None:
@@ -226,14 +209,22 @@ class WellChatAgent:
 
         walk(data)
 
-    def _valid_files(self) -> set[str]:
-        return {r["file_name"] for r in self.conn.execute("SELECT file_name FROM documents")}
+    def _documents(self) -> dict[str, sqlite3.Row]:
+        return {r["file_name"]: r for r in self.conn.execute("SELECT file_name, doc_type, report_no FROM documents")}
 
-    def _finalize(self, content: str, trace: list[dict], consulted: dict[str, set]) -> ChatResult:
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            data = {"status": "answered", "language": "id", "answer": content, "sources": []}
+    @staticmethod
+    def _mentioned(answer: str, doc: sqlite3.Row) -> bool:
+        """True bila jawaban menyebut dokumen ini, lewat nama file atau pola seperti "DDR #61" / "DGOS 95"."""
+        if doc["file_name"] in answer:
+            return True
+        if doc["doc_type"] == "GLOSSARY":
+            return bool(re.search(r"glos", answer, re.I))
+        if not doc["report_no"]:
+            return False
+        rx = rf"\b{re.escape(doc['doc_type'])}\s*(?:#|no\.?|nomor|report)?\s*{re.escape(doc['report_no'])}\b"
+        return bool(re.search(rx, answer, re.I))
+
+    def _finalize(self, data: dict, trace: list[dict], consulted: dict[str, set]) -> ChatResult:
         status = data.get("status", "answered")
         lang = data.get("language") if data.get("language") in ("id", "en") else "id"
 
@@ -245,14 +236,18 @@ class WellChatAgent:
         if status == "not_found":
             return ChatResult("not_found", NOT_FOUND[lang], [], lang, tool_calls=trace)
 
-        valid = self._valid_files()
+        answer = str(data.get("answer") or "").strip()
+        docs = self._documents()
         sources, seen = [], set()
-        for s in data.get("sources", []):
-            if s.get("file") in valid and (s["file"], s.get("page")) not in seen:
+        for s in data.get("sources") or []:
+            if isinstance(s, dict) and s.get("file") in docs and (s["file"], s.get("page")) not in seen:
                 seen.add((s["file"], s.get("page")))
                 sources.append(s)
-        if not sources:  # model lupa mencantumkan sumber: pakai file yang dikembalikan tool
-            sources = [{"file": f, "page": min(p) if p else None, "section": "retrieved"} for f, p in consulted.items() if f in valid]
+        if not sources:  # model tidak mencantumkan sumber: pakai file hasil tool, utamakan yang disebut di jawaban
+            retrieved = [f for f in consulted if f in docs]
+            files = [f for f in retrieved if self._mentioned(answer, docs[f])] or retrieved
+            sources = [{"file": f, "page": min(consulted[f]) if consulted[f] else None, "section": "retrieved"}
+                       for f in files]
         if not sources:
             return ChatResult("not_found", NOT_FOUND[lang], [], lang, tool_calls=trace)
-        return ChatResult("answered", data.get("answer", "").strip(), sources, lang, tool_calls=trace)
+        return ChatResult("answered", answer, sources, lang, tool_calls=trace)

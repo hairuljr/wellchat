@@ -15,6 +15,8 @@ DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "wellchat.db")).resolve()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL") or None  # endpoint lain yang kompatibel dengan OpenAI
+# selalu dikirim eksplisit ke SDK: tanpa ini SDK membaca OPENAI_BASE_URL kosong dari env sebagai URL
+API_BASE_URL = OPENAI_BASE_URL or "https://api.openai.com/v1"
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini")
 # hanya dikirim ke model reasoning (gpt-5*, o*); kosongkan agar tidak dikirim
 OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "none")

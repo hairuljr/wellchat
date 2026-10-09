@@ -45,7 +45,11 @@ def main(argv: list[str]) -> int:
             break
         if not q:
             break
-        r = agent.ask(q, history)
+        try:
+            r = agent.ask(q, history)
+        except Exception as exc:  # error API / batas waktu: tampilkan, lalu lanjut ke pertanyaan berikutnya
+            print(f"Error: {exc}")
+            continue
         print(format_result(r))
         history += [{"role": "user", "content": q}, {"role": "assistant", "content": r.answer}]
     return 0
