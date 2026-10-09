@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 from . import config
@@ -51,8 +52,29 @@ def list_reports(conn: sqlite3.Connection) -> dict:
     }
 
 
-def get_planned_operations(conn: sqlite3.Connection) -> dict:
-    """Rencana operasi berikutnya menurut setiap laporan, diurutkan dari laporan terlama."""
+PLAN_META = {"file", "type", "report_no", "report_date", "well", "pages", "page"}
+
+
+def _topic_terms(conn: sqlite3.Connection, word: str) -> set[str]:
+    """Satu kata topik beserta padanannya di glosarium, misalnya "wireline" <-> "WL"."""
+    terms = {word}
+    for r in conn.execute("SELECT term, full_form FROM glossary"):
+        full_form = r["full_form"] or ""
+        if r["term"].lower() == word.lower() or re.search(rf"\b{re.escape(word)}\b", full_form, re.I):
+            terms |= {r["term"], full_form}
+    return {t for t in terms if t}
+
+
+def _mentions(text: str, term: str) -> bool:
+    return bool(re.search(rf"(?<![\w-]){re.escape(term)}(?![\w-])", text, re.I))
+
+
+def get_planned_operations(conn: sqlite3.Connection, topic: str | None = None) -> dict:
+    """Rencana operasi berikutnya menurut setiap laporan, diurutkan dari laporan terlama.
+
+    Dengan `topic`, hanya laporan yang rencananya menyebut setiap kata topik (atau padanannya
+    di glosarium) yang dikembalikan, supaya laporan dengan rencana lain tidak ikut dikutip.
+    """
     plans = []
     for d in _docs(conn):
         brief = _doc_brief(d)
@@ -69,7 +91,15 @@ def get_planned_operations(conn: sqlite3.Connection) -> dict:
             if fields:
                 plans.append({**brief, "page": min(f["page"] for f in fields.values()),
                               **{k: f["value"] for k, f in fields.items()}})
-    return {"plans": plans}
+    if not topic:
+        return {"plans": plans}
+    groups = [_topic_terms(conn, w) for w in re.findall(r"[\w/-]+", topic) if len(w) > 1]
+    matched = [p for p in plans
+               if all(any(_mentions(" ".join(str(v) for k, v in p.items() if k not in PLAN_META), t) for t in g)
+                      for g in groups)]
+    if matched:
+        return {"topic": topic, "plans": matched}
+    return {"topic": topic, "note": "no plan mentions this topic; every plan is shown", "plans": plans}
 
 
 def search_reports(conn: sqlite3.Connection, query: str, report_type: str = "ANY", limit: int = 8) -> dict:
@@ -198,8 +228,10 @@ TOOL_SPECS = [
             "additionalProperties": False}}},
     {"type": "function", "function": {
         "name": "get_planned_operations",
-        "description": "What every report says is planned next: DGOS 'NEXT 24 HRS OPERATION' and DDR '24 hr forecast' + 'Current status', oldest report first. Use for planned / next / forecast / rencana questions (e.g. planned wireline runs, next operation).",
-        "parameters": {"type": "object", "properties": {}, "additionalProperties": False}}},
+        "description": "What every report says is planned next: DGOS 'NEXT 24 HRS OPERATION' and DDR '24 hr forecast' + 'Current status', oldest report first. Use for planned / next / forecast / rencana questions (e.g. planned wireline runs, next operation). When the question names a topic, pass it as `topic` so only the reports whose plan mentions it are returned.",
+        "parameters": {"type": "object", "properties": {
+            "topic": {"type": "string", "description": "Optional English keyword(s) the plan must mention, e.g. 'wireline' or 'casing'. Glossary abbreviations count (wireline also matches WL)."}},
+            "additionalProperties": False}}},
     {"type": "function", "function": {
         "name": "read_report_section",
         "description": "Read a whole section of one report. Omit `section` to list the sections. DDR sections include STATUS, OPERATION SUMMARY (row table with NPT flags), BIT DATA / MUD CHECK, SURVEYS, BULKS... DGOS sections include CURRENT OPERATION @ 0600 HRS, LAST 24 HRS OPERATION, NEXT 24 HRS OPERATION, DAILY REMARKS, TABLES (casing & formation tops).",

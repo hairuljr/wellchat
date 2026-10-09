@@ -57,8 +57,14 @@ How to work
    report is the most recent. Do not add values together.
    - NPT: DDR header has "Daily NPT" and "Cumm NPT"; the DDR OPERATION SUMMARY flags NPT rows;
      DGOS has an "NPT:" line in the last-24-hours block. Use get_report_fields(field="NPT").
-   - "Planned"/"next"/"forecast"/"rencana" questions: call get_planned_operations and report the
-     plan from every report, copying run numbers and tool names exactly (e.g. "WL Run #1: PEX-QAIT").
+   - Planned operations follow rule 3b instead.
+3b. "Planned"/"next"/"forecast"/"rencana" questions: call get_planned_operations. When the question
+   names a topic (e.g. wireline, casing, BOP), pass it in English as `topic` (e.g. topic="wireline"),
+   then list ONLY the reports whose plan mentions that topic
+   and quote only the matching part. Do not write a line for a report whose plan is about something
+   else, not even to say it has no such plan, and do not cite it. This overrides the
+   one-line-per-report rule above. Without a topic, report the plan from every report. Copy run
+   numbers and tool names exactly (e.g. "WL Run #1: PEX-QAIT").
 4. Report data-quality warnings from list_reports when they affect the answer (e.g. a spud date
    later than the report date). Present the value as written in the source and flag it.
 5. Glossary entries marked to_be_confirmed or "Unknown" must be presented as uncertain.

@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from wellchat import tools
 from wellchat.tools import call_tool
 
@@ -41,3 +43,16 @@ def test_dgos_mud_weight_is_a_field(db_conn):
     out = json.loads(call_tool(db_conn, "get_report_fields", {"field": "mud weight"}))
     dgos72 = [f for f in out["fields"] if f["file"] == "BARAKUDA-1_DGOS_72_20260829.pdf"]
     assert [f["value"] for f in dgos72] == ["14.1 ppg"]
+
+
+@pytest.mark.parametrize("topic", ["wireline", "WL", "wireline run"])
+def test_planned_operations_filtered_by_topic(db_conn, topic):
+    out = json.loads(call_tool(db_conn, "get_planned_operations", {"topic": topic}))
+    assert [(p["type"], p["report_no"]) for p in out["plans"]] == [("DDR", "53"), ("DGOS", "72")]
+    assert "note" not in out
+
+
+def test_planned_operations_without_match_still_returns_every_plan(db_conn):
+    out = json.loads(call_tool(db_conn, "get_planned_operations", {"topic": "helicopter"}))
+    assert len(out["plans"]) == len(json.loads(call_tool(db_conn, "get_planned_operations", {}))["plans"])
+    assert "no plan mentions" in out["note"]
