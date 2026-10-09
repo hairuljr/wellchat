@@ -6,10 +6,10 @@ Dokumen ini merangkum pengujian yang saya jalankan di mesin sendiri pada **9 Okt
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`python -m pytest -q`) | **44/44 lulus** dalam ±6 detik |
-| Evaluasi end-to-end (`python -m eval.run_eval`) | **23/23 lulus** di tiga run terakhir berturut-turut |
-| Waktu respons paling lambat | **6,4 detik** di run terakhir, 8,9 detik di ketiga run (syarat soal: maksimal 180 detik) |
-| Rata-rata / median waktu respons | 4,0 detik / 4,3 detik |
+| Unit test (`python -m pytest -q`) | **48/48 lulus** dalam ±6 detik |
+| Evaluasi end-to-end (`python -m eval.run_eval`) | **23/23 lulus** di empat run terakhir berturut-turut, termasuk run final dengan pengecekan `must_not` |
+| Waktu respons paling lambat | **10,1 detik** di run final (syarat soal: maksimal 180 detik) |
+| Rata-rata / median waktu respons | 4,6 detik / 4,5 detik (run final) |
 | Re-parse dataset setelah perbaikan parser | Hanya field `OPERATOR` di kedua DGOS yang berubah (dari kosong menjadi `PTT PUBLIC COMPANY LIMITED`); semua nilai lain identik |
 
 ## Lingkungan
@@ -38,7 +38,7 @@ Semua unit test berjalan tanpa API key. Bagian agen memakai LLM palsu yang jawab
 | `tests/test_models.py` | 5 | Dropdown model: urutan pilihan, tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, pilihan model tidak bocor ke sesi lain |
 | `tests/test_parsers.py` | 8 | Header dan lokasi DGOS (termasuk `OPERATOR`), pembersihan label putih tersembunyi, rencana wireline, tabel DGOS, header dan NPT DDR, baris operasi DDR, glosarium, baris MD bulat/kosong dan laporan tanpa heading `BIT DATA` |
 | `tests/test_synthetic.py` | 4 | PDF buatan dengan layout serupa tetapi nilai berbeda: semua file terparsing, field dan NPT DDR baru, DGOS baru (termasuk `OPERATOR` dan `AFE No.`) bisa dicari, PDF dengan layout tak dikenal tetap bisa dicari |
-| `tests/test_tools.py` | 5 | Rencana operasi dari semua laporan, daftar sumur, hasil tool yang terlalu panjang tetap JSON valid (teks panjang maupun list panjang), mud weight DGOS bisa diambil sebagai field |
+| `tests/test_tools.py` | 9 | Rencana operasi dari semua laporan, rencana yang disaring per topik (`wireline`, `WL`, `wireline run` hanya mengembalikan DDR #53 dan DGOS #72; topik tanpa kecocokan tetap mengembalikan semua rencana), daftar sumur, hasil tool yang terlalu panjang tetap JSON valid (teks panjang maupun list panjang), mud weight DGOS bisa diambil sebagai field |
 
 Test di `test_parsers.py`, `test_tools.py`, dan hampir semua test di `test_agent.py` memakai dataset asli, dan otomatis di-skip kalau `data/raw` kosong.
 
@@ -57,32 +57,32 @@ Evaluasi ini memakai LLM sungguhan dan dataset asli. Sebuah pertanyaan dianggap 
 | *Offset well* tanpa laporan (harus "tidak ditemukan") | 1 | 1 |
 | **Total** | **23** | **23** |
 
-### Rincian per pertanyaan (run terakhir)
+### Rincian per pertanyaan (run final)
 
 | # | Pertanyaan | Status | Waktu (detik) |
 |---|---|---|---|
-| 1 | Dimana letak lokasi sumur? | answered | 6,4 |
-| 2 | Berapa Total NPT sumur? | answered | 4,3 |
-| 3 | Wireline run apa yang direncanakan? | answered | 4,4 |
-| 4 | Apa arti NPT? | answered | 2,9 |
-| 5 | What does BHA stand for? | answered | 2,8 |
-| 6 | Apa nama rig yang digunakan? | answered | 4,3 |
-| 7 | Siapa operator sumur ini? | answered | 4,5 |
+| 1 | Dimana letak lokasi sumur? | answered | 10,1 |
+| 2 | Berapa Total NPT sumur? | answered | 6,4 |
+| 3 | Wireline run apa yang direncanakan? | answered | 5,0 |
+| 4 | Apa arti NPT? | answered | 3,8 |
+| 5 | What does BHA stand for? | answered | 3,2 |
+| 6 | Apa nama rig yang digunakan? | answered | 4,5 |
+| 7 | Siapa operator sumur ini? | answered | 3,9 |
 | 8 | Berapa water depth sumur? | answered | 4,6 |
-| 9 | Berapa kedalaman MD pada DDR nomor 53? | answered | 3,8 |
-| 10 | Berapa daily cost pada laporan tanggal 19 Juli 2026? | answered | 4,7 |
-| 11 | Apa penyebab NPT pada DGOS report 84? | answered | 6,2 |
-| 12 | What was the mud weight in DGOS report 72? | answered | 5,0 |
-| 13 | Kapan spud date sumur? | answered | 4,9 |
-| 14 | What is the actual MD of formation top K-28? | answered | 4,8 |
-| 15 | Apa arti BMP? | answered | 3,2 |
+| 9 | Berapa kedalaman MD pada DDR nomor 53? | answered | 4,5 |
+| 10 | Berapa daily cost pada laporan tanggal 19 Juli 2026? | answered | 5,2 |
+| 11 | Apa penyebab NPT pada DGOS report 84? | answered | 5,7 |
+| 12 | What was the mud weight in DGOS report 72? | answered | 4,5 |
+| 13 | Kapan spud date sumur? | answered | 7,0 |
+| 14 | What is the actual MD of formation top K-28? | answered | 4,9 |
+| 15 | Apa arti BMP? | answered | 3,1 |
 | 16 | Berapa jumlah personel di rig pada DDR 53? | answered | 4,6 |
-| 17 | What is the objective of the well? | answered | 5,1 |
-| 18 | Siapa presiden Indonesia saat ini? | out_of_scope | 3,6 |
-| 19 | Buatkan kode Python untuk mengurutkan list. | out_of_scope | 2,2 |
-| 20 | Berapa harga minyak Brent hari ini? | out_of_scope | 3,6 |
-| 21 | What's the weather in Jakarta tomorrow? | out_of_scope | 3,8 |
-| 22 | Halo, apa kabar? | out_of_scope | 2,9 |
+| 17 | What is the objective of the well? | answered | 8,2 |
+| 18 | Siapa presiden Indonesia saat ini? | out_of_scope | 2,5 |
+| 19 | Buatkan kode Python untuk mengurutkan list. | out_of_scope | 2,1 |
+| 20 | Berapa harga minyak Brent hari ini? | out_of_scope | 3,7 |
+| 21 | What's the weather in Jakarta tomorrow? | out_of_scope | 4,4 |
+| 22 | Halo, apa kabar? | out_of_scope | 4,1 |
 | 23 | Berapa NPT sumur TAPIS-F? | not_found | 0,0 |
 
 Pertanyaan #23 selesai dalam 0,0 detik karena guardrail *offset well* langsung menjawab "tidak ditemukan" tanpa memanggil LLM.
@@ -99,6 +99,20 @@ Saya menjalankan evaluasi penuh tujuh kali dengan `gpt-5.4-mini`. Empat run pert
 | 5–7 | 23/23, 23/23, 23/23 | – | Setelah prompt menambahkan aturan "untuk nilai header laporan, pakai `get_report_fields` lebih dulu". |
 
 Karena jawaban LLM tidak sepenuhnya deterministik, angka waktu dan isi jawaban bisa sedikit berbeda di setiap run. Tiga run terakhir berturut-turut lulus 23/23 dengan respons paling lambat 8,9 detik.
+
+## Pemeriksaan jawaban mentah: pertanyaan wireline
+
+Setelah tiga run 23/23 di atas, saya memeriksa jawaban utuh untuk "Wireline run apa yang direncanakan?". Kata kunci wajibnya selalu ada, tetapi di salah satu run jawabannya ikut memuat rencana pengeboran DDR #32 dan mengutip DDR #32 serta DGOS #84, padahal keduanya tidak menyebut wireline. Eval menghitungnya lulus karena hanya memeriksa kata kunci wajib.
+
+| Perubahan | Percobaan pertanyaan wireline | Hasil (hanya DDR #53 dan DGOS #72, tanpa rencana lain) |
+|---|---|---|
+| Aturan tambahan di prompt | 3 kali | 2/3 |
+| Aturan prompt dipisah dan dinyatakan mengalahkan aturan "satu baris per laporan" | 5 kali | 3/5 |
+| `get_planned_operations(topic=...)` menyaring di kode, dengan padanan singkatan dari glosarium | 5 kali | **5/5** |
+
+Pertanyaan rencana tanpa topik ("Apa rencana operasi berikutnya?") tetap menampilkan rencana dari keempat laporan. Pengecekan `must_not` dan `sources_must_not` yang baru di eval menghitung run bermasalah tadi sebagai gagal (saya cek ulang secara offline terhadap jawaban yang tersimpan).
+
+Setelah perubahan ini saya menjalankan evaluasi penuh sekali lagi, kini dengan pengecekan `must_not` yang lebih ketat: **23/23 lulus**, respons paling lambat 10,1 detik, rata-rata 4,6 detik. Untuk pertanyaan wireline, model memanggil `get_planned_operations(topic="wireline")` dan hanya menyebut serta mengutip DDR #53 dan DGOS #72.
 
 ## Mencoba model dan endpoint lain
 

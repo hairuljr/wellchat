@@ -15,3 +15,4 @@ venv/
 
 # eval output (contains excerpts of the dataset)
 eval/results.md
+eval/results.json

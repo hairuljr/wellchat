@@ -20,7 +20,7 @@ Selain yang diminta di soal, saya menambahkan beberapa hal berikut. Semuanya ops
 - **Batas waktu yang ditegakkan.** Satu jawaban dibatasi 150 detik di kode, di bawah syarat 3 menit, termasuk saat provider lambat atau macet.
 - **Dua bahasa dan pertanyaan lanjutan.** Jawaban mengikuti bahasa pertanyaan (Indonesia atau Inggris), dan beberapa giliran percakapan terakhir ikut dikirim supaya pertanyaan lanjutan seperti "kalau di laporan berikutnya?" tetap dipahami.
 - **CLI di terminal**, selain UI Streamlit, untuk pengecekan cepat dan skrip evaluasi.
-- **Pengujian.** 44 unit test (termasuk PDF sintetis dengan nilai berbeda untuk membuktikan parser tidak hafal file contoh), set evaluasi 23 pertanyaan dengan LLM sungguhan, dan rangkuman hasilnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md).
+- **Pengujian.** 48 unit test (termasuk PDF sintetis dengan nilai berbeda untuk membuktikan parser tidak hafal file contoh), set evaluasi 23 pertanyaan dengan LLM sungguhan, dan rangkuman hasilnya di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md).
 - **Endpoint OpenAI-compatible dan pilihan model.** Selain OpenAI, aplikasi bisa diarahkan ke endpoint lain lewat `OPENAI_BASE_URL`, dan model bisa dipilih per sesi lewat dropdown bila `MODEL_ALLOWLIST` diisi. Lihat [Memakai penyedia LLM selain OpenAI](#memakai-penyedia-llm-selain-openai) dan [Memilih model di UI](#memilih-model-di-ui-opsional).
 
 ---
@@ -334,14 +334,14 @@ Isi test suite:
 - `tests/test_agent.py`: memeriksa loop agen dan guardrail dengan LLM palsu: penolakan baku, jawaban tanpa tool dianggap di luar cakupan, "tidak ditemukan" tanpa mencari memicu riset ulang, sumber halusinasi dibuang, JSON dalam blok kode atau jawaban kosong, pertanyaan tentang *offset well*, schema yang hanya dikirim di panggilan akhir, serta batas waktu jawaban.
 - `tests/test_models.py`: memeriksa dropdown model di UI Streamlit (lewat `streamlit.testing`): tanpa allowlist tidak ada dropdown, endpoint gagal atau tidak ada model yang cocok kembali ke `OPENAI_MODEL`, dan pilihan model tidak bocor ke sesi lain.
 - `tests/test_tools.py`: memeriksa tool yang dipanggil LLM, misalnya rencana operasi dari semua laporan, daftar sumur, dan hasil tool yang terlalu panjang tetap berupa JSON valid.
-- `eval/questions.json`: 23 pertanyaan uji (3 contoh dari soal, pertanyaan faktual lain, glosarium, dan di luar cakupan). `run_eval` mengukur akurasi dan waktu respons, lalu menulis hasilnya ke `eval/results.md`.
+- `eval/questions.json`: 23 pertanyaan uji (3 contoh dari soal, pertanyaan faktual lain, glosarium, dan di luar cakupan). Setiap pertanyaan punya kata kunci wajib (`must`), dan bila perlu juga teks yang tidak boleh muncul (`must_not`) serta file yang tidak boleh dikutip (`sources_must_not`), supaya jawaban yang benar tetapi bercampur informasi tidak relevan tetap dihitung gagal. `run_eval` mengukur akurasi dan waktu respons, menulis ringkasan ke `eval/results.md`, dan menyimpan jawaban utuh beserta sumber serta tool call-nya ke `eval/results.json`.
 
 ### Ringkasan hasil di mesin saya
 
 | Pengujian | Hasil |
 |---|---|
-| Unit test (`pytest`) | **44/44 lulus** dalam ±6 detik |
-| Evaluasi end-to-end (`eval.run_eval`) dengan `gpt-5.4-mini` di api.openai.com | **23/23 lulus** di tiga run terakhir berturut-turut, respons paling lambat **8,9 detik**, rata-rata 4,0 detik (batas 180 detik) |
+| Unit test (`pytest`) | **48/48 lulus** dalam ±6 detik |
+| Evaluasi end-to-end (`eval.run_eval`) dengan `gpt-5.4-mini` di api.openai.com | **23/23 lulus** di empat run terakhir berturut-turut, respons paling lambat **10,1 detik**, rata-rata 4,6 detik di run final (batas 180 detik) |
 
 Lingkungan pengujian, rincian per pertanyaan, dan catatan dari beberapa kali run ada di **[HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md)**.
 
@@ -409,10 +409,11 @@ tests/                  unit test (parser, PDF sintetis, agen dengan LLM palsu)
 11. **Sebagian proxy tidak pernah memanggil tool.** Saat saya mencoba dua model lain lewat proxy OpenAI-compatible, keduanya sering langsung menjawab "tidak ditemukan" tanpa satu pun tool call. Setelah saya uji request yang sama dengan dan tanpa `response_format`, ternyata proxy yang saya pakai menerapkan JSON schema dengan memaksa model langsung mengeluarkan jawaban akhir, sehingga tool tidak pernah sempat dipanggil. *Solusi:* jawaban dibagi dua fase. Fase riset memanggil tool tanpa `response_format`, dan model cukup membalas `READY` bila datanya sudah lengkap (supaya jawaban tidak ditulis dua kali). Setelah itu ada satu panggilan jawaban dengan `response_format` dan `tool_choice="none"`. Model yang tetap menjawab "tidak ditemukan" tanpa mencari diwajibkan memanggil tool sekali lagi, JSON dalam blok kode tetap dibaca, dan jawaban kosong diperlakukan sebagai "tidak ditemukan".
 12. **Data yang ada di PDF tapi tidak terjangkau model.** Evaluasi dengan `gpt-5.4-mini` menemukan dua kasus. Pertama, nilai `OPERATOR` di DGOS tersimpan kosong: pembersih judul halaman (`PTT PUBLIC COMPANY LIMITED` yang menempel di ujung baris) ikut menghapus nilai yang isinya persis judul itu, sehingga model menjawab dari `OPERATORSHIP` (COB). Kedua, mud weight DGOS hanya ada di teks, bukan sebagai field. *Solusi:* judul hanya dibuang bila menempel di belakang teks lain, nilai baris mud DGOS (mud weight, mud type, progress, ROP) didaftarkan sebagai field, dan prompt meminta model memakai `get_report_fields` lebih dulu untuk nilai header (teks bebas sering memuat angka lain dengan nama mirip, misalnya kedalaman wireline `2426.7m-WLD` yang bukan MD laporan).
 13. **`OPENAI_BASE_URL=` tanpa nilai membuat semua request gagal.** SDK OpenAI membaca variabel itu sendiri dari environment dan memakai string kosong sebagai URL ("Connection error"). *Solusi:* base URL selalu dikirim eksplisit ke SDK, dengan default `https://api.openai.com/v1`.
+14. **Jawaban rencana yang benar tetapi bercampur informasi lain.** Saat saya memeriksa jawaban mentah untuk "Wireline run apa yang direncanakan?", sebagian jawaban ikut mencantumkan rencana pengeboran dari laporan yang tidak menyebut wireline, dan mengutip laporan tersebut sebagai sumber. Eval tetap menghitungnya lulus karena hanya memeriksa kata kunci wajib. Aturan tambahan di prompt saja tidak cukup (2 dari 3, lalu 3 dari 5 percobaan bersih). *Solusi:* `get_planned_operations` menerima `topic` dan menyaring laporannya di kode, dengan padanan singkatan dari glosarium (rencana DGOS menulis "WL Run", bukan "wireline"). Setelah itu 5 dari 5 percobaan hanya menyebut dan mengutip DDR #53 dan DGOS #72. Eval juga mendapat pengecekan `must_not` dan `sources_must_not` supaya kasus seperti ini dihitung gagal.
 
 ### Hasil evaluasi
 
-Di mesin saya, dengan `gpt-5.4-mini` langsung di api.openai.com, tiga run evaluasi terakhir berturut-turut lulus **23/23**, dengan respons paling lambat **8,9 detik** (batas 180 detik). Rinciannya ada di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md). Untuk mengulanginya, jalankan `python -m eval.run_eval`; hasil terbaru akan ditulis ke `eval/results.md`.
+Di mesin saya, dengan `gpt-5.4-mini` langsung di api.openai.com, empat run evaluasi terakhir berturut-turut lulus **23/23**, dengan respons paling lambat **10,1 detik** (batas 180 detik). Rinciannya ada di [HASIL_PENGUJIAN.md](HASIL_PENGUJIAN.md). Untuk mengulanginya, jalankan `python -m eval.run_eval`; hasil terbaru akan ditulis ke `eval/results.md`.
 
 ### Rencana perbaikan ke depan
 

@@ -1,7 +1,8 @@
 [
   {"q": "Dimana letak lokasi sumur?", "status": ["answered"], "must": [["Malaysia", "MALAYSIA"]]},
   {"q": "Berapa Total NPT sumur?", "status": ["answered"], "must": [["1.5", "1,5"]]},
-  {"q": "Wireline run apa yang direncanakan?", "status": ["answered"], "must": [["WL Run #1: PEX-QAIT"], ["WL Run #2: MDT (QS-Saturn)"]]},
+  {"q": "Wireline run apa yang direncanakan?", "status": ["answered"], "must": [["WL Run #1: PEX-QAIT"], ["WL Run #2: MDT (QS-Saturn)"]],
+   "must_not": ["DSUT", "BOP", "1650m", "Jet clean"], "sources_must_not": ["DDR_32", "DGOS_84"]},
   {"q": "Apa arti NPT?", "status": ["answered"], "must": [["Non-Productive Time", "Non Productive Time"]]},
   {"q": "What does BHA stand for?", "status": ["answered"], "must": [["Bottom Hole Assembly"]]},
   {"q": "Apa nama rig yang digunakan?", "status": ["answered"], "must": [["NAGA-2", "Naga-2"]]},
